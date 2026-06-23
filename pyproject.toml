@@ -1,0 +1,67 @@
+# pyproject.toml
+# ==============
+# Standard PEP 621 packaging metadata for OptiCipher. With this file you can:
+#
+#     pip install -e .        # editable install for development
+#     pip install .           # regular install
+#
+# and then run the tool from anywhere as `opticipher ...` (console script) or
+# `python -m opticipher ...`.
+
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "opticipher"
+version = "1.0.0"
+description = "Open-source optical (perceptual) image encryption for research and education."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [{ name = "OptiCipher contributors" }]
+keywords = [
+    "image-encryption",
+    "perceptual-encryption",
+    "visual-cryptography",
+    "steganography",
+    "chacha20",
+    "research",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Topic :: Security :: Cryptography",
+    "Topic :: Scientific/Engineering :: Image Processing",
+]
+
+# Runtime dependencies. Deliberately minimal and all widely-used / well-audited.
+dependencies = [
+    "numpy>=1.21",
+    "Pillow>=9.0",
+    "cryptography>=38.0",
+]
+
+[project.optional-dependencies]
+# Install with:  pip install -e ".[dev]"
+dev = [
+    "pytest>=7.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/bio-colab/OptiCipher"
+Repository = "https://github.com/bio-colab/OptiCipher"
+Issues = "https://github.com/bio-colab/OptiCipher/issues"
+
+# Console entry point: installs an `opticipher` command on the PATH.
+[project.scripts]
+opticipher = "opticipher.cli:main"
+
+[tool.setuptools.packages.find]
+# Only ship the library package; tests/examples/samples are not installed.
+include = ["opticipher*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

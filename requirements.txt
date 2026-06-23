@@ -1,0 +1,8 @@
+# OptiCipher runtime dependencies.
+# All are widely used and well audited. Versions are lower bounds.
+numpy>=1.21
+Pillow>=9.0
+cryptography>=38.0
+
+# For running the test suite (optional):
+#   pip install pytest
