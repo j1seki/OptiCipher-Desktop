@@ -1,5 +1,12 @@
 # OptiCipher
 
+> **This repository is the OptiCipher Desktop fork** — a cross-platform desktop
+> app and hardware-accelerated build of [bio-colab/OptiCipher](https://github.com/bio-colab/OptiCipher)
+> (MIT). The encryption algorithm, file format and CLI are unchanged: encrypted
+> PNGs are **bit-for-bit interchangeable** with the original tool in both
+> directions, proven by a test suite that pins every compute backend to the
+> reference bytes. See [OptiCipher Desktop](#opticipher-desktop-this-fork) below.
+
 **Open-source optical (perceptual) image encryption — for research and education.**
 
 OptiCipher turns an image into a real, viewable PNG that *looks* like pure noise,
@@ -15,8 +22,80 @@ original image, pixel for pixel.
 
 ---
 
+## OptiCipher Desktop (this fork)
+
+A PySide6 desktop app over the same library, with pluggable hardware
+acceleration and per-OS installers.
+
+### What the desktop app adds
+
+| Feature | Details |
+|---|---|
+| **Encrypt / Decrypt / Analyze** | drag-and-drop, batch queues, before/after preview |
+| **Metrics dashboard** | entropy, H/V/D adjacent correlation, NPCR/UACI, 256-bin histograms |
+| **Compute device picker** | Auto / GPU / CPU, CPU thread count, RAM budget — Auto runs a one-time per-machine calibration and picks the faster backend |
+| **KDF cost slider** | PBKDF2 iterations (the format-legal cost knob; higher = slower brute-force, slower encrypt) |
+| **Background jobs** | every job runs on a worker thread with progress + cancel; the UI never blocks |
+| **Device info panel** | shows the exact GPU adapter and API in use (Metal / Vulkan / DX12) |
+
+### Hardware acceleration, without breaking the format
+
+`opticipher/accel/` adds compute backends under the unchanged public API:
+
+- **CPU backend** — multi-core ChaCha20 (band-split with exact counter-seek so
+  the keystream is *identical* to the single-context reference) and RAM-budget
+  band sizing.
+- **GPU backend** — WebGPU via `wgpu` (WGSL compute shaders): Metal on macOS
+  (incl. Apple Silicon), Vulkan on Linux, DX12/Vulkan on Windows. ChaCha20
+  full blocks on the GPU, tail via the reference cipher; histogram / NPCR /
+  UACI kernels for the Analyze tab. No CUDA toolkit needed — `wgpu` ships its
+  own native binaries in its wheels.
+- **Automatic CPU fallback** — no GPU, no Vulkan, or a driver problem? Every
+  job still runs, on the CPU backend, with the reason shown in the UI.
+
+**The hard rule, enforced by tests:** every backend must produce
+byte-identical output to the upstream reference implementation.
+`tests/test_accel.py` + `tests/test_gpu_accel.py` pin the keystream against
+OpenSSL golden vectors across block boundaries and sizes — any single-byte
+drift fails CI before it can touch a user's file. Measured numbers and their
+honest interpretation live in [docs/BENCHMARKS.md](docs/BENCHMARKS.md).
+
+### Install / run
+
+```bash
+git clone <this-repo> && cd OptiCipher
+python -m venv .venv && source .venv/bin/activate
+pip install -e ".[app]"      # library + PySide6 + wgpu
+python -m app.main           # launch the desktop app
+```
+
+Extras: `.[dev]` (tests), `.[gpu]` (wgpu only, no GUI), `.[app]` (GUI + wgpu).
+
+### Packaged builds
+
+CI (`.github/workflows/build.yml`) builds installable artifacts on every push:
+**Linux** `tar.gz` + best-effort AppImage · **macOS** arm64 `.app` + DMG ·
+**Windows** portable zip — each smoke-tested headless before upload. To build
+locally:
+
+```bash
+pip install pyinstaller
+pyinstaller packaging/opticipher-desktop.spec --noconfirm
+./dist/OptiCipherDesktop/OptiCipherDesktop --smoke   # headless check
+```
+
+### Attribution & license
+
+MIT, unchanged from upstream — © [bio-colab](https://github.com/bio-colab)
+(see [LICENSE](LICENSE)). This fork adds the `app/`, `opticipher/accel/` and
+`packaging/` trees and keeps every upstream file's behaviour intact; the
+original algorithm, CLI and docs below are theirs.
+
+---
+
 ## Table of contents
 
+- [OptiCipher Desktop (this fork)](#opticipher-desktop-this-fork)
 - [What "optical encryption" means here](#what-optical-encryption-means-here)
 - [Is this idea new?](#is-this-idea-new)
 - [How it works (the algorithm)](#how-it-works-the-algorithm)
@@ -173,21 +252,39 @@ OptiCipher/
 │   ├── core.py              # encrypt/decrypt orchestration + HMAC
 │   ├── io_image.py          # PNG load/save helpers
 │   ├── metrics.py           # entropy, correlation, NPCR, UACI
-│   └── cli.py               # command-line interface
+│   ├── cli.py               # command-line interface
+│   └── accel/               # (fork) compute backends — bit-exact layers
+│       ├── backend.py       # backend interface, settings, auto-calibration
+│       ├── cpu.py           # threaded ChaCha20 + int32 permutation
+│       └── gpu.py           # WebGPU/WGSL kernels + adapter discovery
+├── app/                     # (fork) PySide6 desktop application
+│   ├── main.py              # entry point (python -m app.main)
+│   ├── window.py            # main window, settings dialog
+│   ├── workers.py           # QThread job + analysis workers
+│   ├── settings.py          # QSettings persistence → accel config
+│   ├── device.py            # CPU/RAM/GPU introspection
+│   └── charts.py            # histogram & metric bar widgets
+├── packaging/               # (fork) PyInstaller spec, icons, entry
+├── .github/workflows/       # (fork) 3-OS CI build + smoke tests
 ├── tests/                   # pytest suite (run with `pytest`)
 │   ├── test_roundtrip.py
 │   ├── test_components.py
-│   └── test_metrics_and_sample.py
+│   ├── test_metrics_and_sample.py
+│   ├── test_accel.py            # (fork) CPU-backend parity vs reference
+│   ├── test_gpu_accel.py        # (fork) GPU golden-vector parity
+│   └── test_gui_smoke.py        # (fork) headless GUI wiring tests
 ├── samples/                 # the bundled "CLAUDE CODE" sample + outputs
 │   ├── sample_claude_code.png
 │   ├── sample_encrypted.png
 │   └── sample_decrypted.png
 ├── examples/                # runnable demos
 │   ├── demo.py
-│   └── benchmark.py
+│   ├── benchmark.py
+│   └── benchmark_accel.py   # (fork) CPU-vs-GPU acceleration benchmark
 ├── docs/                    # extra documentation
 │   ├── ALGORITHM.md
-│   └── METRICS.md
+│   ├── METRICS.md
+│   └── BENCHMARKS.md        # (fork) acceleration benchmark report
 ├── pyproject.toml           # packaging / install metadata
 ├── requirements.txt
 ├── LICENSE                  # MIT
@@ -202,17 +299,26 @@ OptiCipher/
 Requires **Python 3.9+**.
 
 ```bash
-git clone https://github.com/bio-colab/OptiCipher.git
+git clone <this-repository>
 cd OptiCipher
 
-# Option A: install the package (gives you the `opticipher` command)
+# Option A: library + CLI only
 pip install -e .
 
-# Option B: just install the dependencies and run in place
+# Option B: desktop app (adds PySide6 + wgpu)
+pip install -e ".[app]"
+
+# Option C: just install the dependencies and run in place
 pip install -r requirements.txt
 ```
 
-Dependencies are minimal and widely used: **NumPy**, **Pillow**, **cryptography**.
+Core dependencies are minimal and widely used: **NumPy**, **Pillow**,
+**cryptography**. Optional extras (see `pyproject.toml`): `.[dev]` (pytest),
+`.[gpu]` (WebGPU acceleration only), `.[app]` (GUI + WebGPU).
+
+Launch the desktop app with `python -m app.main`, or use the CLI exactly as
+upstream documents below — the two share the same library and the same
+bit-exact v1 file format.
 
 ---
 
@@ -351,26 +457,46 @@ formally analyse the scheme are very welcome — see below.
 ## Running the tests
 
 ```bash
-pip install -e ".[dev]"     # installs pytest
+pip install -e ".[app,dev]"  # pytest + GUI/GPU test deps
 pytest -v
 ```
 
-The suite (34 tests) covers each component in isolation, full encrypt→decrypt
-round trips across many image shapes (including RGBA and degenerate 1×N images),
-Unicode passphrases, wrong-passphrase rejection, tamper detection, and the
-statistical behaviour on the real sample image.
+The suite (96 tests in this fork) covers each component in isolation, full
+encrypt→decrypt round trips across many image shapes (including RGBA and
+degenerate 1×N images), Unicode passphrases, wrong-passphrase rejection, tamper
+detection, and the statistical behaviour on the real sample image — plus the
+fork's parity layers:
+
+- `test_accel.py` — CPU backend byte-parity vs the reference (thread counts,
+  band/counter-seek edge cases, permutation identity, selection/fallback).
+- `test_gpu_accel.py` — GPU golden-vector keystream parity vs OpenSSL and exact
+  metric equality (auto-skips when no WebGPU adapter is present, e.g. CI).
+- `test_gui_smoke.py` — headless (offscreen) desktop-app wiring: window
+  construction, settings, worker round-trip, analysis report shape.
+
+Every encrypted file in these tests is checked for bit-exact compatibility with
+the upstream algorithm in both directions — the format promise is a test, not
+a hope.
 
 ---
 
 ## Benchmarking
 
 ```bash
-python examples/benchmark.py
+python examples/benchmark.py        # upstream throughput baseline
+python examples/benchmark_accel.py  # fork: reference vs threaded CPU vs GPU
 ```
 
-Prints encryption/decryption throughput across image sizes, the isolated PBKDF2
-cost, and the full statistical suite, and writes
-`examples/benchmark_results.json` for further analysis.
+The upstream script prints encryption/decryption throughput across image
+sizes, the isolated PBKDF2 cost, and the full statistical suite, writing
+`examples/benchmark_results.json`.
+
+The fork's acceleration benchmark compares the reference, threaded-CPU and
+GPU backends on diffusion (4K/8K), metrics and end-to-end encrypt/decrypt,
+asserts bit-exactness while it measures, and writes
+[`docs/BENCHMARKS.md`](docs/BENCHMARKS.md) — including an honest section on
+where the GPU wins (histograms, weak CPUs) and where transfer overhead makes
+the CPU the better choice.
 
 ---
 
@@ -384,8 +510,10 @@ include:
 - Adding **Argon2id** as an optional KDF.
 - Adding new **metrics** (e.g. χ² histogram uniformity test, local Shannon
   entropy, key-sensitivity analysis).
-- A **GUI** or web front-end over the library.
-- Performance work (vectorisation, optional native backend).
+- A **GUI** or web front-end over the library. *(shipped in this fork: the
+  PySide6 desktop app — new front-end ideas still welcome)*
+- Performance work (vectorisation, optional native backend). *(WebGPU +
+  threaded CPU shipped in this fork; more ideas welcome)*
 - More **sample images** and reproducible metric reports.
 - Independent **security analysis** and write-ups.
 
@@ -400,3 +528,8 @@ behaviour.
 Released under the **MIT License** — you are free to use, modify, and
 redistribute it, including commercially, provided the copyright and licence
 notice are retained. See [`LICENSE`](LICENSE).
+
+Copyright © [bio-colab](https://github.com/bio-colab) and contributors
+(upstream OptiCipher). This Desktop fork preserves the MIT license and the
+upstream copyright notice; the added application, acceleration and packaging
+code is likewise MIT-licensed.

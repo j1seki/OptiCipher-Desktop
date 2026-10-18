@@ -49,6 +49,7 @@ import hmac as _hmac
 import numpy as np
 
 from . import diffusion, header, keys, scramble, stego
+from .accel import get_backend
 
 
 def _compute_hmac(
@@ -110,10 +111,14 @@ def encrypt_image(
     derived = keys.derive_keys(passphrase, salt, iterations)
 
     # 2. Spatial confusion: shuffle pixel positions.
-    scrambled = scramble.scramble_pixels(pixels, derived.scramble_seed)
+    #    (Routed through the acceleration backend; the permutation itself is
+    #    bit-identical to `scramble.scramble_pixels`.)
+    scrambled = get_backend().scramble(pixels, derived.scramble_seed)
 
     # 3. Value diffusion: stream-cipher the colour bytes.
-    diffused = diffusion.diffuse(scrambled, derived.stream_key, salt)
+    #    (Routed through the acceleration backend; byte-identical to
+    #    `diffusion.diffuse`.)
+    diffused = get_backend().diffuse(scrambled, derived.stream_key, salt)
 
     # 4. Determine strip size, build the header, and authenticate the main image.
     strip_rows = stego.rows_needed(header.HEADER_SIZE, w, channels)
@@ -201,7 +206,9 @@ def decrypt_image(pixels: np.ndarray, passphrase: str) -> np.ndarray:
         )
 
     # 5. Undo diffusion, then undo scrambling -> exact original.
-    undiffused = diffusion.undiffuse(main_cipher, derived.stream_key, hdr.salt)
-    restored = scramble.unscramble_pixels(undiffused, derived.scramble_seed)
+    #    (Routed through the acceleration backend, same bytes as the
+    #    reference `diffusion.undiffuse` / `scramble.unscramble_pixels`.)
+    undiffused = get_backend().undiffuse(main_cipher, derived.stream_key, hdr.salt)
+    restored = get_backend().unscramble(undiffused, derived.scramble_seed)
 
     return restored

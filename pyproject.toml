@@ -45,9 +45,18 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# Install with:  pip install -e ".[dev]"
+# Install with:  pip install -e ".[dev]"          (tests)
+#               pip install -e ".[gpu]"          (WebGPU acceleration)
+#               pip install -e ".[app]"          (desktop GUI)
 dev = [
     "pytest>=7.0",
+]
+gpu = [
+    "wgpu>=0.25",
+]
+app = [
+    "PySide6>=6.6",
+    "wgpu>=0.25",
 ]
 
 [project.urls]
