@@ -74,3 +74,6 @@ include = ["opticipher*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# Repo root on sys.path so `import app.*` works for the GUI smoke tests no
+# matter how pytest is invoked (console-script `pytest` vs `python -m pytest`).
+pythonpath = ["."]

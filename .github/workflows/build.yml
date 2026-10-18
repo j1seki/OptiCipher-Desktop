@@ -38,6 +38,18 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e ".[app,dev]" pyinstaller
 
+      # GitHub's Ubuntu runners ship no GL/EGL libraries, which PySide6 needs
+      # even offscreen (Qt links libEGL at import). Covers both the test run
+      # and the packaged-binary smoke test later.
+      - name: Install Qt system libraries (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libegl1 libgl1 libglib2.0-0 libxkbcommon0 \
+            libxkbcommon-x11-0 libdbus-1-3 libfontconfig1
+
       - name: Run test suite (offscreen)
         shell: bash
         env:
