@@ -256,6 +256,29 @@ class GpuBackend(AccelerationBackend):
         except Exception:
             return False
 
+    def close(self) -> None:
+        """
+        Release every device-side object deterministically, buffers first.
+
+        This exists because of a teardown-order crash: leaving cached buffers
+        alive until interpreter finalization lets Python's cyclic GC free them
+        in an arbitrary order *relative to the device* (and to Qt's own
+        teardown, which runs during the same finalization pass). That produced
+        sporadic glibc heap corruption reported far away as
+        `corrupted double-linked list` / `malloc_consolidate(): unaligned
+        fastbin chunk detected` while Qt destroyed widgets.
+
+        `accel.shutdown()` calls this at a controlled point — Qt fully alive,
+        wgpu runtime healthy — in strict reference-drop order:
+        cached buffers -> pipelines -> device. After that, finalization has
+        no wgpu objects left to race with.
+        """
+        self._buf_cache.clear()
+        self._chacha_pipeline = None
+        self._hist_pipeline = None
+        self._npcr_uaci_pipeline = None
+        self._device = None
+
     # -- helpers ------------------------------------------------------------
     def _get_buffer(self, key: tuple, size: int, usage) -> object:
         """Cached device buffer lookup; creates on miss (key includes size)."""

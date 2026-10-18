@@ -46,6 +46,7 @@ from .backend import (
     get_backend,
     get_config,
     list_backends,
+    shutdown,
 )
 
 __all__ = [
@@ -54,4 +55,5 @@ __all__ = [
     "get_backend",
     "get_config",
     "list_backends",
+    "shutdown",
 ]

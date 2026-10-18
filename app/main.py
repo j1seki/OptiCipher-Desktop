@@ -16,6 +16,8 @@ import sys
 
 from PySide6.QtWidgets import QApplication
 
+from opticipher import accel
+
 from .window import MainWindow
 
 
@@ -29,6 +31,13 @@ def main() -> int:
         window.show()
         app.processEvents()
         print("SMOKE OK")
+        # Release compute-backend resources (cached GPU buffers/device)
+        # while both runtimes are healthy, before finalization — see
+        # accel.shutdown() for the teardown-order crash this prevents.
+        accel.shutdown()
+        window.close()
+        window.deleteLater()
+        app.processEvents()
         return 0
 
     app = QApplication(sys.argv)
@@ -36,7 +45,11 @@ def main() -> int:
     app.setOrganizationName("bio-colab")
     window = MainWindow()
     window.show()
-    return app.exec()
+    code = app.exec()
+    # Same ordered release as the smoke path: drop the compute backend
+    # before interpreter finalization so wgpu teardown can't race Qt's.
+    accel.shutdown()
+    return code
 
 
 if __name__ == "__main__":

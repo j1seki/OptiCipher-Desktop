@@ -166,6 +166,44 @@ def configure(
         _BACKEND_CACHE = None
 
 
+def shutdown() -> None:
+    """
+    Release the cached backend's resources now, in a controlled order.
+
+    Apps should call this before interpreter finalization (the GUI does, in
+    `app.main`): the GPU backend holds WebGPU buffers/device whose cyclic-GC
+    destruction order is *undefined* during `Py_Finalize`, and it can race
+    with Qt's own finalization teardown. That race showed up as sporadic
+    heap corruption at process exit (`corrupted double-linked list`,
+    `malloc_consolidate(): unaligned fastbin chunk detected`), taking the
+    app down after the work was already done.
+
+    Dropping everything here — while Qt and the wgpu runtime are both fully
+    alive — makes the order deterministic: GPU buffers, then pipelines, then
+    device, then nothing left for finalization to race over. Safe to call
+    more than once; a later `get_backend()` simply re-resolves.
+    """
+    global _BACKEND_CACHE, _CAL_PAYLOAD, _CAL_RESULT, _CAL_NOTE
+    with _LOCK:
+        backend = _BACKEND_CACHE
+        _BACKEND_CACHE = None
+        _CAL_PAYLOAD = None
+        _CAL_RESULT = None
+        _CAL_NOTE = ""
+    if backend is not None:
+        close = getattr(backend, "close", None)
+        if callable(close):
+            try:
+                close()
+            except Exception:  # closing must never raise at exit
+                pass
+    # Break any remaining reference cycles (e.g. device -> error-callback
+    # closure -> backend) so the dropped objects are freed right now.
+    import gc
+
+    gc.collect()
+
+
 def get_config() -> Dict[str, object]:
     """
     Snapshot of the current settings for the GUI device panel.

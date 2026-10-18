@@ -172,3 +172,28 @@ def test_gpu_info_reports_adapter_fields():
     # vendor/backend_type come from the adapter; present on all platforms.
     assert "backend_type" in info
     assert "adapter" in info
+
+
+# ---------------------------------------------------------------------------
+# Deterministic teardown (process-exit corruption regression guard).
+# ---------------------------------------------------------------------------
+def test_gpu_close_releases_buffers_before_device():
+    """
+    GpuBackend.close() must drop cached buffers, then pipelines, then the
+    device — the strict order accel.shutdown() relies on. Freeing cached
+    WebGPU buffers during interpreter finalization (GC order undefined)
+    raced Qt's own teardown and corrupted the heap: sporadic
+    "corrupted double-linked list" aborts at process exit.
+    """
+    gpu = GpuBackend()
+    assert gpu.usable
+    rng = np.random.default_rng(77)
+    img = rng.integers(0, 256, (256, 256, 3), dtype=np.uint8)
+    gpu.diffuse(img, b"\x11" * 32, b"\x22" * 16)
+    assert gpu._buf_cache  # the call populated the buffer cache
+    gpu.close()
+    assert gpu._buf_cache == {}
+    assert gpu._chacha_pipeline is None
+    assert gpu._hist_pipeline is None
+    assert gpu._npcr_uaci_pipeline is None
+    assert gpu._device is None

@@ -29,7 +29,7 @@ import pytest
 from opticipher import decrypt_image, encrypt_image
 from opticipher import diffusion as ref_diffusion
 from opticipher import scramble as ref_scramble
-from opticipher.accel import configure, get_backend, get_config, list_backends
+from opticipher.accel import configure, get_backend, get_config, list_backends, shutdown
 from opticipher.accel.cpu import CpuBackend, _chacha_xor_banded, _derive_nonce
 from opticipher.core import DecryptionError
 
@@ -215,3 +215,23 @@ def test_list_backends_reports_cpu_and_gpu_rows():
     names = {row["name"] for row in rows}
     assert "cpu" in names
     assert "gpu" in names
+
+
+def test_shutdown_releases_cache_and_reresolves():
+    """
+    Regression pin for the process-exit heap-corruption fix.
+
+    shutdown() must (a) drop the cached backend so a later get_backend()
+    re-resolves a fresh instance, and (b) be safe to call when nothing was
+    ever resolved. Leaving stale WebGPU buffers/device to be freed during
+    interpreter finalization raced Qt's teardown and corrupted the heap
+    ("corrupted double-linked list" crashes at exit).
+    """
+    configure(device="cpu")
+    first = get_backend()
+    assert get_backend() is first  # cached
+    shutdown()
+    second = get_backend()
+    assert second is not first
+    shutdown()  # idempotent
+    shutdown()
