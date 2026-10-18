@@ -308,7 +308,9 @@ class MainWindow(QMainWindow):
         widget = QWidget()
         layout = QVBoxLayout(widget)
 
-        self.file_lists = getattr(self, "_file_lists", {})
+        # NB: read back the attribute we actually store on — a stale name here
+        # makes the second tab's construction drop the first tab's list.
+        self.file_lists = getattr(self, "file_lists", {})
         files = FileList()
         self.file_lists[mode] = files
         layout.addWidget(files, 1)

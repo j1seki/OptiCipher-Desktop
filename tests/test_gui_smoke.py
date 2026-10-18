@@ -58,6 +58,21 @@ def test_main_window_constructs(qapp):
     window.close()
 
 
+def test_file_lists_cover_encrypt_and_decrypt(qapp):
+    """
+    Regression: _build_crypt_tab used to read a stale `_file_lists` name, so
+    constructing the Decrypt tab silently discarded the Encrypt tab's list —
+    encryption then hit KeyError and drag-and-drop landed in the analyze list.
+    Both keys must exist, and each FileList must be the widget actually
+    embedded in its tab (parented), not a detached instance.
+    """
+    window = MainWindow()
+    assert set(window.file_lists) == {"encrypt", "decrypt"}
+    for mode in ("encrypt", "decrypt"):
+        assert window.file_lists[mode].parent() is not None
+    window.close()
+
+
 def test_settings_dialog_lists_devices(qapp):
     dialog = SettingsDialog()
     values = [dialog.device_combo.itemData(i) for i in range(dialog.device_combo.count())]
