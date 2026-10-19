@@ -10,11 +10,13 @@ Fix 1 — one session QApplication.
     Per-module QApplication fixtures tore down a live application between
     test modules, so a single session-scoped `qapp` owns the app.
 
-Fix 2 — process-lifetime keep-alive for test QObjects.
+Fix 2 — keep-alive helper for test QObjects (`qt` fixture).
     Python's garbage collector may free a QObject at an arbitrary later
-    moment, including after Qt state is gone. Tests register every QObject
-    they hand to Qt via the `qt` fixture (`qt(worker)`, `qt(window, job)`)
-    into `_QT_KEEPALIVE`, which is never cleared while the process runs.
+    moment, while Qt signal connections still reference it. Tests can
+    register every QObject they hand to Qt via the `qt` fixture
+    (`qt(worker)`, `qt(window, job)`); `_QT_KEEPALIVE` is never cleared
+    while the process runs. Opt-in belt-and-suspenders for mid-run GC —
+    it cannot matter after exit (Fix 3 runs no destructors at all).
 
 Fix 3 — exit before interpreter shutdown (the CI segfault).
     Even with Fixes 1-2, CPython shutdown (Py_Finalize) tears down module
