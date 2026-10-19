@@ -425,7 +425,7 @@ def test_verify_reports_verified_for_an_untouched_ciphertext(window, sample_imag
     from app.workers import VerifyWorker
 
     src, _ = sample_image
-    enc_path = str(sample_image[0].rsplit("/", 1)[0] + "/cipher.png")
+    enc_path = os.path.join(os.path.dirname(src), "cipher.png")
     save_image(encrypt_image(load_image(src), "pw", iterations=10_000), enc_path)
 
     worker = VerifyWorker(enc_path, "pw")
@@ -445,7 +445,7 @@ def test_verify_reports_failure_for_a_wrong_passphrase(window, sample_image):
     from app.workers import VerifyWorker
 
     src, _ = sample_image
-    enc_path = str(sample_image[0].rsplit("/", 1)[0] + "/cipher2.png")
+    enc_path = os.path.join(os.path.dirname(src), "cipher2.png")
     save_image(encrypt_image(load_image(src), "pw", iterations=10_000), enc_path)
 
     worker = VerifyWorker(enc_path, "not-the-passphrase")
@@ -473,7 +473,7 @@ def test_verify_without_a_passphrase_claims_nothing(window, sample_image):
     from app.workers import VerifyWorker
 
     src, _ = sample_image
-    enc_path = str(sample_image[0].rsplit("/", 1)[0] + "/cipher3.png")
+    enc_path = os.path.join(os.path.dirname(src), "cipher3.png")
     save_image(encrypt_image(load_image(src), "pw", iterations=10_000), enc_path)
 
     worker = VerifyWorker(enc_path, None)
@@ -500,7 +500,7 @@ def test_verify_page_renders_the_state(window, sample_image):
     from app.workers import VerifyWorker
 
     src, _ = sample_image
-    enc_path = str(sample_image[0].rsplit("/", 1)[0] + "/cipher4.png")
+    enc_path = os.path.join(os.path.dirname(src), "cipher4.png")
     save_image(encrypt_image(load_image(src), "pw", iterations=10_000), enc_path)
 
     worker = VerifyWorker(enc_path, "pw")
