@@ -29,7 +29,6 @@ from types import SimpleNamespace
 
 import pytest
 from PySide6.QtCore import QObject, Signal
-from PySide6.QtWidgets import QApplication
 
 from app.sftp import (
     SftpError,
@@ -40,11 +39,11 @@ from app.sftp import (
     upload_file,
 )
 
-
-@pytest.fixture(scope="module")
-def qapp():
-    app = QApplication.instance() or QApplication([])
-    yield app
+# Test-created QObjects (e.g. RecordingJob workers with live signal
+# connections) are kept alive for the whole session: letting Python delete
+# them directly mid-run is what Qt warns about ("shared QObject was deleted
+# directly") and what can segfault the interpreter at teardown on Linux CI.
+_KEEPALIVE: list = []
 
 
 # ---------------------------------------------------------------------------
@@ -441,6 +440,7 @@ def test_window_prompts_for_credentials_once_per_session(qapp, tiny_png, monkeyp
     monkeypatch.setattr(wmod, "JobWorker", RecordingJob)
 
     window._start_job("encrypt")
+    _KEEPALIVE.extend([window, window._job])
     # Credentials collected once…
     assert prompt_count == [("srv", 2200, "alice")]
     # …and handed to the worker (memory only, never settings).
@@ -449,6 +449,7 @@ def test_window_prompts_for_credentials_once_per_session(qapp, tiny_png, monkeyp
 
     # Second run on the same target: no second prompt.
     window._start_job("encrypt")
+    _KEEPALIVE.append(window._job)
     assert prompt_count == [("srv", 2200, "alice")]
     window.close()
 
@@ -491,6 +492,7 @@ def test_sftp_credentials_never_reach_qsettings(qapp, tiny_png, monkeypatch):
     monkeypatch.setattr(wmod, "SftpCredentialsDialog", StubDialog)
     monkeypatch.setattr(wmod, "JobWorker", RecordingJob)
     window._start_job("encrypt")
+    _KEEPALIVE.extend([window, window._job])
 
     # In memory: present.
     assert any(

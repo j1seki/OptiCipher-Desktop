@@ -22,18 +22,11 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import numpy as np
 import pytest
-from PySide6.QtWidgets import QApplication
 
 from opticipher import encrypt_image, load_image, save_image
 
 from app.window import MainWindow, SettingsDialog
 from app.workers import AnalyzeWorker, JobWorker
-
-
-@pytest.fixture(scope="module")
-def qapp():
-    app = QApplication.instance() or QApplication([])
-    yield app
 
 
 @pytest.fixture()
