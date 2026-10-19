@@ -158,3 +158,91 @@ def test_analyze_worker_accepts_original_ciphertext_pair(qapp, sample_image, tmp
     assert results and not failures
     assert results[0]["npcr"] is not None
     assert results[0]["uaci"] is not None
+
+
+def test_kdf_slider_is_the_encrypt_tab_widget(qapp):
+    """
+    Regression: _build_crypt_tab used to build a slider+label pair for BOTH
+    tabs into the same attributes, so the Decrypt tab's hidden slider
+    silently replaced the visible Encrypt one — moving it updated nothing
+    and the chosen cost never reached the job.
+    """
+    window = MainWindow()
+    assert window.iter_slider is window._enc_iter_slider
+    assert window.encrypt_tab.isAncestorOf(window.iter_slider)
+    window.iter_slider.setValue(11)
+    assert "550,000" in window._enc_iter_label.text()
+    window.close()
+
+
+def test_technical_settings_carry_tooltips(qapp):
+    """Every technical setting must explain itself on hover."""
+    window = MainWindow()
+    dialog = SettingsDialog()
+    for widget in (
+        dialog.device_combo,
+        dialog.threads_spin,
+        dialog.ram_spin,
+        dialog.iter_spin,
+        window._enc_iter_slider,
+    ):
+        assert widget.toolTip(), f"{widget} has no tooltip"
+    dialog.close()
+    window.close()
+
+
+def test_added_file_previews_and_reports_metadata(qapp, sample_image):
+    """
+    Adding a file must show it in the "before" preview and fill the info
+    panel (name, dimensions, size, header detection) immediately — before
+    any job runs — so the user can confirm the right image was chosen.
+    """
+    window = MainWindow()
+    src, _ = sample_image
+    window.file_lists["encrypt"].add_paths([src])
+    assert window.file_lists["encrypt"].current_path() == src
+    assert getattr(window.preview_before, "_path", None) == src
+    text = window.info_label.text()
+    assert os.path.basename(src) in text
+    assert "×" in text  # dimensions
+    assert "No OptiCipher header" in text  # plain image
+    window.close()
+
+
+def test_describe_image_reports_ciphertext_header(qapp, sample_image, tmp_path):
+    """The info panel must recognise a ciphertext and quote its header."""
+    from app.window import describe_image
+
+    _, img = sample_image
+    enc_path = str(tmp_path / "sample_encrypted.png")
+    save_image(encrypt_image(img, "pw", iterations=10_000), enc_path)
+    text = describe_image(enc_path)
+    assert "OptiCipher v1 header" in text
+    assert "PBKDF2" in text
+
+
+def test_preview_click_opens_viewer(qapp, sample_image, monkeypatch):
+    """Clicking a populated preview opens the enlarge dialog for that file."""
+    import app.window as wmod
+
+    seen = {}
+
+    class FakeViewer:
+        def __init__(self, path, info="", parent=None):
+            seen["path"] = path
+
+        def setWindowTitle(self, title):
+            seen["title"] = title
+
+        def exec(self):
+            seen["exec"] = True
+
+    monkeypatch.setattr(wmod, "ImageViewer", FakeViewer)
+    window = wmod.MainWindow()
+    src, _ = sample_image
+    window.file_lists["encrypt"].add_paths([src])
+    window._enlarge("before")
+    assert seen.get("path") == src
+    assert seen.get("exec")
+    assert "before" in seen.get("title", "")
+    window.close()

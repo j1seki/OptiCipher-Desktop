@@ -28,7 +28,7 @@ from __future__ import annotations
 import os
 from typing import List, Optional
 
-from PySide6.QtCore import Qt, QSettings, QTimer
+from PySide6.QtCore import Qt, QSettings, QTimer, Signal
 from PySide6.QtGui import QAction, QDragEnterEvent, QDropEvent, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
@@ -59,27 +59,137 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from PIL import Image
+
 from opticipher import __version__ as _lib_version
-from opticipher import accel
+from opticipher import accel, load_image
 
 from . import device as _device
 from .charts import HistogramBars, ValueBar
 from .settings import AppSettings
-from .workers import AnalyzeWorker, JobWorker
+from .workers import AnalyzeWorker, JobWorker, detect_opticipher_header
 
 _IMAGE_FILTER = "Images (*.png *.jpg *.jpeg *.bmp *.gif *.tif *.tiff)"
+
+
+# ---------------------------------------------------------------------------
+# Image metadata + enlarge-on-click viewer.
+# ---------------------------------------------------------------------------
+def _human_size(nbytes: int) -> str:
+    if nbytes < 1024:
+        return f"{nbytes} B"
+    if nbytes < 1024 ** 2:
+        return f"{nbytes / 1024:.1f} KiB"
+    if nbytes < 1024 ** 3:
+        return f"{nbytes / 1024 ** 2:.1f} MiB"
+    return f"{nbytes / 1024 ** 3:.2f} GiB"
+
+
+def describe_image(path: str) -> str:
+    """
+    Human-readable metadata for the info panel: name, format, colour mode,
+    dimensions, file size, and whether the file carries an OptiCipher
+    ciphertext header (an unauthenticated peek — the HMAC is only verified
+    during decryption).
+    """
+    lines = [os.path.basename(path)]
+    try:
+        size = _human_size(os.path.getsize(path))
+        with Image.open(path) as im:
+            width, height = im.size
+            extra = f"{im.format or '?'} · {im.mode} · {width}×{height} · {size}"
+            frames = getattr(im, "n_frames", 1)
+            if frames > 1:
+                extra += f" · {frames} frames"
+        lines.append(extra)
+    except Exception as exc:  # noqa: BLE001 - info panel, never fatal
+        lines.append(f"(cannot read image info: {exc})")
+        return "\n".join(lines)
+    try:
+        header = detect_opticipher_header(load_image(path))
+    except Exception:  # noqa: BLE001 - unreadable pixels just mean "no header"
+        header = None
+    if header:
+        lines.append(
+            "OptiCipher v{version} header · original {width}×{height} "
+            "{channels} ch · PBKDF2 {iterations:,} iters · strip "
+            "{strip_rows} rows".format(**header)
+        )
+    else:
+        lines.append("No OptiCipher header — plain image")
+    return "\n".join(lines)
+
+
+def _tipped_row(label_text: str, tip: str, widget: QWidget):
+    """A form row whose label and widget both carry the same tooltip."""
+    label = QLabel(label_text)
+    label.setToolTip(tip)
+    widget.setToolTip(tip)
+    return label, widget
+
+
+class ClickableLabel(QLabel):
+    """QLabel that emits `clicked` on a left-click (enlarge-on-click previews)."""
+
+    clicked = Signal()
+
+    def mouseReleaseEvent(self, event) -> None:  # noqa: N802
+        if event.button() == Qt.LeftButton:
+            self.clicked.emit()
+        super().mouseReleaseEvent(event)
+
+
+class ImageViewer(QDialog):
+    """Enlarge dialog: the image at its native size inside a scroll area."""
+
+    def __init__(self, path: str, info_text: str = "", parent=None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle(os.path.basename(path))
+        self.setAttribute(Qt.WA_DeleteOnClose)
+        pix = QPixmap(path)
+        image_label = QLabel()
+        image_label.setPixmap(pix)
+        image_label.setAlignment(Qt.AlignCenter)
+        scroll = QScrollArea()
+        scroll.setWidget(image_label)
+        scroll.setWidgetResizable(True)
+        scroll.setAlignment(Qt.AlignCenter)
+        layout = QVBoxLayout(self)
+        if info_text:
+            info = QLabel(info_text)
+            info.setWordWrap(True)
+            info.setTextInteractionFlags(Qt.TextSelectableByMouse)
+            layout.addWidget(info)
+        layout.addWidget(scroll, 1)
+        # Size the dialog to the screen, not the image: large images scroll,
+        # small ones simply center. Esc ( QDialog default) closes.
+        screen = QApplication.primaryScreen().availableGeometry()
+        self.resize(
+            max(420, min(pix.width() + 48, screen.width() - 100)),
+            max(320, min(pix.height() + 90, screen.height() - 120)),
+        )
 
 
 # ---------------------------------------------------------------------------
 # Building blocks.
 # ---------------------------------------------------------------------------
 class FileList(QWidget):
-    """Batch file list with drag-and-drop and add/remove controls."""
+    """
+    Batch file list with drag-and-drop and add/remove controls.
+
+    Emits `selection_changed(path)` whenever the current item changes ("" when
+    the selection is empty), so the window can show the file in the "before"
+    preview the moment it is added — no job required to confirm you picked
+    the right image.
+    """
+
+    selection_changed = Signal(str)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self.listw = QListWidget()
         self.listw.setSelectionMode(QListWidget.ExtendedSelection)
+        self.listw.currentItemChanged.connect(self._on_current_changed)
         add_btn = QPushButton("Add files…")
         folder_btn = QPushButton("Add folder…")
         clear_btn = QPushButton("Clear")
@@ -102,14 +212,30 @@ class FileList(QWidget):
             for i in range(self.listw.count())
         ]
 
+    def current_path(self) -> str:
+        item = self.listw.currentItem()
+        return item.data(Qt.UserRole) if item else ""
+
     def add_paths(self, paths: List[str]) -> None:
         existing = set(self.paths())
+        first_new = None
         for path in paths:
             if path not in existing:
                 item = QListWidgetItem(os.path.basename(path))
                 item.setToolTip(path)
                 item.setData(Qt.UserRole, path)
                 self.listw.addItem(item)
+                if first_new is None:
+                    first_new = item
+        # Select the newly added file so the preview + info panel update
+        # immediately, before any job is started.
+        if first_new is not None:
+            self.listw.setCurrentItem(first_new)
+
+    def _on_current_changed(self, current, _previous) -> None:
+        self.selection_changed.emit(
+            current.data(Qt.UserRole) if current is not None else ""
+        )
 
     def _add_dialog(self) -> None:
         settings = AppSettings()
@@ -147,26 +273,61 @@ class SettingsDialog(QDialog):
 
         self.device_combo = QComboBox()
         self._fill_devices()
-        form.addRow("Compute device", self.device_combo)
+        form.addRow(
+            *_tipped_row(
+                "Compute device",
+                "Where the heavy work runs. Auto does a one-time speed test "
+                "on this machine and picks the faster of GPU and CPU. GPU "
+                "uses WebGPU — Metal on macOS, Vulkan on Linux, DirectX 12 "
+                "on Windows — and falls back to CPU when no adapter exists.",
+                self.device_combo,
+            )
+        )
 
         self.threads_spin = QSpinBox()
         self.threads_spin.setRange(0, 256)
         self.threads_spin.setValue(self.settings.threads)
         self.threads_spin.setSpecialValueText("Auto (all cores)")
-        form.addRow("CPU threads", self.threads_spin)
+        form.addRow(
+            *_tipped_row(
+                "CPU threads",
+                "Worker threads for the CPU backend. Auto uses every core. "
+                "The GPU backend ignores this setting.",
+                self.threads_spin,
+            )
+        )
 
         self.ram_spin = QSpinBox()
         self.ram_spin.setRange(16, 65536)
         self.ram_spin.setSingleStep(64)
         self.ram_spin.setSuffix(" MB")
         self.ram_spin.setValue(self.settings.ram_budget_mb)
-        form.addRow("RAM budget", self.ram_spin)
+        form.addRow(
+            *_tipped_row(
+                "RAM budget",
+                "Upper bound on the working memory a single image may use. "
+                "Images that would exceed it still process, but the backend "
+                "may fall back to a slower path — raise this if very large "
+                "images fail or crawl.",
+                self.ram_spin,
+            )
+        )
 
         self.iter_spin = QSpinBox()
         self.iter_spin.setRange(10_000, 2_000_000)
         self.iter_spin.setSingleStep(50_000)
         self.iter_spin.setValue(self.settings.iterations)
-        form.addRow("PBKDF2 iterations", self.iter_spin)
+        form.addRow(
+            *_tipped_row(
+                "PBKDF2 iterations",
+                "Key-derivation cost stored in every NEW ciphertext: how "
+                "many times the passphrase is stretched before use. Higher "
+                "makes guessing the passphrase far slower and encryption a "
+                "little slower. Decryption always reads the stored value "
+                "from the image header — this setting never affects it.",
+                self.iter_spin,
+            )
+        )
 
         info = QGroupBox("This machine")
         info_form = QFormLayout(info)
@@ -247,17 +408,37 @@ class MainWindow(QMainWindow):
         self.tabs.addTab(self.decrypt_tab, "Decrypt")
         self.tabs.addTab(self.analyze_tab, "Analyze")
 
+        # Any file-list selection previews the file immediately — before any
+        # job runs — and refreshes the info panel.
+        for files in list(self.file_lists.values()) + [self.analyze_files]:
+            files.selection_changed.connect(self._on_source_selected)
+
         splitter = QSplitter(Qt.Horizontal)
         splitter.addWidget(self.tabs)
-        self.preview_before = self._preview_label("original")
-        self.preview_after = self._preview_label("result")
+        self.preview_before = self._preview_label("before")
+        self.preview_after = self._preview_label("after")
+        self.preview_before._label.clicked.connect(  # type: ignore[attr-defined]
+            lambda: self._enlarge("before")
+        )
+        self.preview_after._label.clicked.connect(  # type: ignore[attr-defined]
+            lambda: self._enlarge("after")
+        )
         preview = QWidget()
         pv = QVBoxLayout(preview)
         ph = QHBoxLayout()
         ph.addWidget(self.preview_before, 1)
         ph.addWidget(self.preview_after, 1)
         pv.addLayout(ph, 1)
-        pv.addWidget(QLabel("Preview updates when a job finishes"))
+        caption = QLabel(
+            "Selected file shows here immediately — click a preview to enlarge"
+        )
+        caption.setStyleSheet("color:#888;")
+        pv.addWidget(caption)
+        self.info_label = QLabel("")
+        self.info_label.setWordWrap(True)
+        self.info_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        self.info_label.setStyleSheet("color:#9aa0ae;")
+        pv.addWidget(self.info_label)
         splitter.addWidget(preview)
         splitter.setStretchFactor(0, 3)
         splitter.setStretchFactor(1, 2)
@@ -292,16 +473,21 @@ class MainWindow(QMainWindow):
 
         self.setStatusBar(QStatusBar())
 
-    def _preview_label(self, caption: str) -> QGroupBox:
-        box = QGroupBox(caption)
-        label = QLabel()
+    def _preview_label(self, which: str) -> QGroupBox:
+        box = QGroupBox("original" if which == "before" else "result")
+        label = ClickableLabel()
         label.setAlignment(Qt.AlignCenter)
         label.setMinimumSize(240, 200)
         label.setStyleSheet("background:#181a20; color:#888;")
         label.setText("(empty)")
+        label.setCursor(Qt.PointingHandCursor)
+        label.setToolTip("Click to enlarge")
         layout = QVBoxLayout(box)
         layout.addWidget(label)
         box._label = label  # type: ignore[attr-defined]
+        box._which = which  # type: ignore[attr-defined]
+        box._path = None  # type: ignore[attr-defined]
+        box._pixmap = None  # type: ignore[attr-defined]
         return box
 
     def _build_crypt_tab(self, mode: str) -> QWidget:
@@ -331,23 +517,48 @@ class MainWindow(QMainWindow):
         layout.addLayout(pass_row)
 
         options = QHBoxLayout()
-        self.iter_slider = QSlider(Qt.Horizontal)
-        self.iter_slider.setRange(2, 40)  # x50k: 100k..2M
-        self.iter_slider.setValue(max(2, self.settings.iterations // 50_000))
-        self.iter_label = QLabel()
-        self._update_iter_label()
-        self.iter_slider.valueChanged.connect(self._update_iter_label)
         if mode == "encrypt":
-            options.addWidget(QLabel("KDF cost"))
-            options.addWidget(self.iter_slider, 1)
-            options.addWidget(self.iter_label)
+            # NB: this must be encrypt-tab-local. Building a slider/label pair
+            # for both tabs into the SAME attributes made the decrypt tab's
+            # hidden slider silently replace the visible encrypt one — moving
+            # it updated nothing and the chosen cost never reached the job.
+            self._enc_iter_slider = QSlider(Qt.Horizontal)
+            self._enc_iter_slider.setRange(2, 40)  # x50k: 100k..2M
+            self._enc_iter_slider.setValue(
+                max(2, self.settings.iterations // 50_000)
+            )
+            kdf_tip = (
+                "Key-derivation cost for NEW encryptions: the passphrase is "
+                "stretched this many times with PBKDF2 before use. Higher = "
+                "far slower to attack, a little slower to encrypt. Decryption "
+                "reads the real cost from the image header and ignores this "
+                "slider."
+            )
+            self._enc_iter_slider.setToolTip(kdf_tip)
+            self._enc_iter_label = QLabel()
+            self._enc_iter_slider.valueChanged.connect(
+                lambda value: self._update_iter_label(
+                    self._enc_iter_label, value
+                )
+            )
+            self._update_iter_label(
+                self._enc_iter_label, self._enc_iter_slider.value()
+            )
+            kdf_caption = QLabel("KDF cost")
+            kdf_caption.setToolTip(kdf_tip)
+            options.addWidget(kdf_caption)
+            options.addWidget(self._enc_iter_slider, 1)
+            options.addWidget(self._enc_iter_label)
         else:
             hint = QLabel("Iterations are read from the image header automatically")
             hint.setStyleSheet("color:#888;")
+            hint.setToolTip(
+                "Each encrypted image records its own PBKDF2 cost in the "
+                "authenticated header — decryption always uses the value the "
+                "file was encrypted with, whatever the Encrypt tab says."
+            )
             options.addWidget(hint)
             options.addStretch(1)
-        self.iter_slider.setVisible(mode == "encrypt")
-        self.iter_label.setVisible(mode == "encrypt")
         layout.addLayout(options)
 
         out_row = QHBoxLayout()
@@ -474,10 +685,19 @@ class MainWindow(QMainWindow):
             edit.setText(directory)
             self.settings.output_dir = directory
 
-    def _update_iter_label(self) -> None:
-        value = self.iter_slider.value() * 50_000
-        self.iter_label.setText(f"{value:,} iterations")
-        self.iter_label.setMinimumWidth(140)
+    def _update_iter_label(self, label: QLabel, slider_value: int) -> None:
+        label.setText(f"{slider_value * 50_000:,} iterations")
+        label.setMinimumWidth(140)
+
+    @property
+    def iter_slider(self) -> QSlider:
+        """The Encrypt tab's KDF-cost slider (kept for scripts and tests)."""
+        return self._enc_iter_slider
+
+    @property
+    def iter_label(self) -> QLabel:
+        """The Encrypt tab's KDF-cost value label."""
+        return self._enc_iter_label
 
     def _open_settings(self) -> None:
         if SettingsDialog(self).exec() == QDialog.Accepted:
@@ -506,10 +726,60 @@ class MainWindow(QMainWindow):
         if pix.isNull():
             label.setText("(cannot load preview)")
             return
+        box._pixmap = pix  # type: ignore[attr-defined]
+        box._path = path  # type: ignore[attr-defined]
         label.setPixmap(
             pix.scaled(label.size() * 0.98, Qt.KeepAspectRatio, Qt.SmoothTransformation)
         )
         box.setTitle(f"{which} — {os.path.basename(path)}")
+        if which == "before":
+            self.info_label.setText(describe_image(path))
+
+    def _clear_preview(self, which: str) -> None:
+        box = self.preview_before if which == "before" else self.preview_after
+        box._label.setText("(empty)")  # type: ignore[attr-defined]
+        box._label.setPixmap(QPixmap())  # type: ignore[attr-defined]
+        box._pixmap = None  # type: ignore[attr-defined]
+        box._path = None  # type: ignore[attr-defined]
+        box.setTitle("original" if which == "before" else "result")
+        if which == "before":
+            self.info_label.setText("")
+
+    def _on_source_selected(self, path: str) -> None:
+        """Show the selected source immediately — before any job runs."""
+        if path:
+            self._set_preview("before", path)
+        else:
+            self._clear_preview("before")
+
+    def _enlarge(self, which: str) -> None:
+        """Open the enlarge viewer for a preview (click-to-enlarge)."""
+        box = self.preview_before if which == "before" else self.preview_after
+        path = getattr(box, "_path", None)
+        if not path:
+            return
+        viewer = ImageViewer(path, describe_image(path), self)
+        viewer.setWindowTitle(f"{which} — {os.path.basename(path)}")
+        viewer.exec()
+
+    def resizeEvent(self, event) -> None:  # noqa: N802
+        super().resizeEvent(event)
+        # Re-fit stored pixmaps when the window resizes.
+        for box in (
+            getattr(self, "preview_before", None),
+            getattr(self, "preview_after", None),
+        ):
+            if box is None:
+                continue
+            pix = getattr(box, "_pixmap", None)
+            if pix is not None and not pix.isNull():
+                box._label.setPixmap(  # type: ignore[attr-defined]
+                    pix.scaled(
+                        box._label.size() * 0.98,  # type: ignore[attr-defined]
+                        Qt.KeepAspectRatio,
+                        Qt.SmoothTransformation,
+                    )
+                )
 
     # -- encrypt / decrypt jobs ---------------------------------------------
     def _start_job(self, mode: str) -> None:
@@ -530,7 +800,7 @@ class MainWindow(QMainWindow):
                     self, "OptiCipher", "Passphrases do not match."
                 )
                 return
-            iterations = self.iter_slider.value() * 50_000
+            iterations = self._enc_iter_slider.value() * 50_000
             self.settings.iterations = iterations
         else:
             iterations = self.settings.iterations  # unused for decrypt

@@ -177,6 +177,20 @@ pyinstaller packaging/opticipher-desktop.spec --noconfirm
    table and a selectable per-channel histogram; the status bar names the
    compute backend that ran it.
 
+**Preview & info panel**
+
+- The file selected in any tab shows in the **before** preview immediately —
+  as soon as it is added, before any job runs — so you can confirm the right
+  image was chosen.
+- Below the previews, the **info panel** lists the file's name, format,
+  colour mode, resolution, size, and whether it carries an OptiCipher
+  ciphertext header (with the original dimensions, PBKDF2 cost and strip
+  size stored in it).
+- **Click any preview to enlarge** it in a scrollable full-size viewer
+  (Esc closes).
+- Every technical control (KDF cost, compute device, threads, RAM budget,
+  PBKDF2 iterations) has a **tooltip** explaining what it does on hover.
+
 **Settings & the device bar**
 
 - *Settings → Compute device*: **Auto** (a one-time per-machine calibration
@@ -569,7 +583,7 @@ pip install -e ".[app,dev]"  # pytest + GUI/GPU test deps
 pytest -v
 ```
 
-The suite (100 tests in this fork) covers each component in isolation, full
+The suite (105 tests in this fork) covers each component in isolation, full
 encrypt→decrypt round trips across many image shapes (including RGBA and
 degenerate 1×N images), Unicode passphrases, wrong-passphrase rejection, tamper
 detection, and the statistical behaviour on the real sample image — plus the
@@ -580,8 +594,10 @@ fork's parity layers:
 - `test_gpu_accel.py` — GPU golden-vector keystream parity vs OpenSSL and exact
   metric equality (auto-skips when no WebGPU adapter is present, e.g. CI).
 - `test_gui_smoke.py` — headless (offscreen) desktop-app wiring: window
-  construction, per-tab file lists, settings, worker round-trip, analysis
-  report shape, and original+ciphertext pair alignment for NPCR/UACI.
+  construction, per-tab file lists, settings (+ tooltips), the Encrypt
+  tab's KDF slider wiring, worker round-trip, analysis report shape,
+  original+ciphertext pair alignment for NPCR/UACI, the preview/info
+  panel and the click-to-enlarge viewer.
 
 Every encrypted file in these tests is checked for bit-exact compatibility with
 the upstream algorithm in both directions — the format promise is a test, not
