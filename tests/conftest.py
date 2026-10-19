@@ -35,11 +35,15 @@ Fix 3 — exit before interpreter shutdown (the CI segfault).
     destroyQCoreApplication walked child wrappers).
 
     So: do no teardown at all. `pytest_sessionfinish` records the exit
-    status, and an atexit callback — which CPython runs at the *start* of
-    Py_Finalize, before any module or extension teardown — flushes
-    stdlib streams and calls os._exit(status). No Qt object destructor
-    ever runs, so the whole failure class cannot occur. Pytest output and
-    the exit code are unaffected (both are complete before atexit fires).
+    status, disables GC (a late GC pass freeing a stale wrapper would
+    crash before any exit hook runs — seen on Windows CI), and an atexit
+    callback — re-registered there so LIFO puts it ahead of PySide's own
+    atexit cleanup — flushes stdlib streams and exits the process: on
+    Linux via os._exit (raw syscall, nothing runs after), on Windows via
+    TerminateProcess (ExitProcess would still run DLL detach handlers,
+    where PySide's stale state crashed). No Qt object destructor ever
+    runs, so the whole failure class cannot occur. Pytest output and the
+    exit code are unaffected (both are complete before atexit fires).
     Caveat: other atexit callbacks (e.g. pytest-cov's data flush) are
     skipped too — fine here since CI runs plain `pytest -q` with no
     coverage; remove this hook if that ever changes.
@@ -76,10 +80,32 @@ def _exit_before_interpreter_shutdown() -> None:
     try:
         import sys
 
+        print(
+            f"[conftest] exiting now with exit={_RECORDED_EXIT} "
+            "(Qt destructors skipped)",
+            file=sys.stderr,
+            flush=True,
+        )
         sys.stdout.flush()
         sys.stderr.flush()
     except Exception:  # noqa: BLE001 - streams may already be gone
         pass
+    if os.name == "nt":
+        # On Windows os._exit() goes through the CRT into ExitProcess,
+        # which still runs DLL_PROCESS_DETACH handlers — PySide's stale
+        # state crashed there on CI. TerminateProcess notifies no DLL,
+        # runs no atexit, and returns only on failure (then os._exit
+        # below is the fallback).
+        try:
+            import ctypes
+
+            k32 = ctypes.windll.kernel32
+            k32.GetCurrentProcess.restype = ctypes.c_void_p
+            k32.TerminateProcess.argtypes = (ctypes.c_void_p, ctypes.c_uint)
+            k32.TerminateProcess.restype = ctypes.c_bool
+            k32.TerminateProcess(k32.GetCurrentProcess(), _RECORDED_EXIT)
+        except Exception:  # noqa: BLE001 - fall through to os._exit
+            pass
     os._exit(_RECORDED_EXIT)
 
 
@@ -99,6 +125,12 @@ def pytest_sessionfinish(session, exitstatus):
     global _RECORDED_EXIT
     try:
         _RECORDED_EXIT = int(exitstatus)
+        # Between here and the atexit exit, no GC-driven deallocation may
+        # run: a Python wrapper whose C++ QObject is already gone, freed by
+        # a late GC pass, crashes PySide right here (seen on Windows CI).
+        import gc
+
+        gc.disable()
     except Exception:  # noqa: BLE001 - never fail the session over this
         pass
     atexit.register(_exit_before_interpreter_shutdown)
