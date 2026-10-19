@@ -436,6 +436,27 @@ def _hash(p: QPainter, box: QRectF, c: QColor) -> None:
     )
 
 
+def _expand(p: QPainter, box: QRectF, c: QColor) -> None:
+    """Four corner brackets — the conventional "open full size" glyph."""
+    length = box.width() * 0.26
+    inset = box.width() * 0.14
+    corners = (
+        (box.left() + inset, box.top() + inset, 1, 1),
+        (box.right() - inset, box.top() + inset, -1, 1),
+        (box.left() + inset, box.bottom() - inset, 1, -1),
+        (box.right() - inset, box.bottom() - inset, -1, -1),
+    )
+    for x, y, dx, dy in corners:
+        p.drawLine(
+            QPointF(x, y + dy * length),
+            QPointF(x, y),
+        )
+        p.drawLine(
+            QPointF(x, y),
+            QPointF(x + dx * length, y),
+        )
+
+
 def _layers(p: QPainter, box: QRectF, c: QColor) -> None:
     for i, y in enumerate((0.24, 0.44, 0.64)):
         path = QPainterPath()
@@ -478,6 +499,7 @@ GLYPHS: Dict[str, _Drawer] = {
     "refresh": _refresh,
     "copy": _copy,
     "eye": _eye,
+    "expand": _expand,
     "hash": _hash,
     "layers": _layers,
 }

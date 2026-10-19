@@ -514,6 +514,100 @@ def test_verify_page_renders_the_state(window, sample_image):
     assert window.verify_page.detail_rows["sha256"].value.text() != "—"
 
 
+def test_preview_enlarge_opens_the_full_size_viewer(qapp, window, sample_image, monkeypatch):
+    """
+    Click-to-enlarge must actually work.
+
+    Regression: the redesigned PreviewBox created a clickable label but
+    nothing was ever connected to it, so the enlarge viewer was dead code
+    and the "Click to enlarge" tooltip was a lie.
+    """
+    import app.window as wmod
+
+    seen = {}
+
+    class FakeViewer:
+        def __init__(self, path, info="", parent=None):
+            seen["path"] = path
+
+        def setWindowTitle(self, title):
+            seen["title"] = title
+
+        def exec(self):
+            seen["exec"] = True
+
+    monkeypatch.setattr(wmod, "ImageViewer", FakeViewer)
+    src, _ = sample_image
+    window.file_lists["encrypt"].add_paths([src])
+    assert window.preview_before.path == src
+
+    # The panel asks the window to enlarge a specific box.
+    window.encrypt_page.preview.enlarge_requested.emit("before", window.encrypt_page.preview)
+    assert seen.get("path") == src
+    assert seen.get("exec")
+    assert "before" in seen.get("title", "")
+
+
+def test_preview_box_offers_an_enlarge_button(qapp, window, sample_image):
+    """The enlarge action is reachable by keyboard, not only by a click target."""
+    src, _ = sample_image
+    box = window.encrypt_page.preview.before
+    assert not box.enlarge_btn.isEnabled()  # nothing loaded yet
+    window.file_lists["encrypt"].add_paths([src])
+    assert box.enlarge_btn.isEnabled()
+    assert box.enlarge_btn.toolTip()
+
+
+def test_settings_theme_switches_immediately(qapp, window):
+    """
+    An appearance switch that needs an "Apply" click feels broken: the
+    theme must change the moment it is chosen.
+    """
+    window.navigate("settings")
+    page = window.settings_page
+    original = window.theme_manager.name
+    other = "light" if original == "dark" else "dark"
+
+    if other == "light":
+        page.light_radio.setChecked(True)
+    else:
+        page.dark_radio.setChecked(True)
+    qapp.processEvents()
+    assert window.theme_manager.name == other
+
+
+def test_settings_reports_pending_changes_and_reverts(qapp, window):
+    """Compute changes are explicit: counted, then applied or discarded."""
+    window.navigate("settings")
+    page = window.settings_page
+    page.panel.reload()
+    assert page.pending_badge.text() == "No pending changes"
+    assert not page.apply_btn.isEnabled()
+
+    page.panel.threads_spin.setValue(7)
+    qapp.processEvents()
+    assert "1 unsaved change" in page.pending_badge.text()
+    assert page.apply_btn.isEnabled()
+    assert page.revert_btn.isEnabled()
+
+    page._revert()
+    assert page.pending_badge.text() == "No pending changes"
+    assert page.panel.threads_spin.value() == window.settings.threads
+
+
+def test_settings_apply_saves_the_values(qapp, window):
+    from app.settings import AppSettings
+
+    window.navigate("settings")
+    page = window.settings_page
+    page.panel.reload()
+    page.panel.threads_spin.setValue(5)
+    page._apply()
+    qapp.processEvents()
+    assert AppSettings().threads == 5
+    assert page.pending_badge.text() == "No pending changes"
+
+
 # ---------------------------------------------------------------------------
 # Session history / overview honesty.
 # ---------------------------------------------------------------------------

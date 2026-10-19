@@ -708,7 +708,12 @@ class PreviewBox(QFrame):
 
     The pixmap is kept at full resolution and re-scaled on resize, so
     dragging the window never degrades the preview permanently.
+
+    Clicking the image — or the "Enlarge" button in its header — emits
+    ``enlarge_requested`` so the window can open the full-size viewer.
     """
+
+    enlarge_requested = Signal()
 
     def __init__(self, title: str, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
@@ -727,9 +732,16 @@ class PreviewBox(QFrame):
         self.path_label = QLabel("")
         self.path_label.setObjectName("Faint")
         self.path_label.setAlignment(Qt.AlignRight)
+        self.enlarge_btn = IconButton(
+            "expand", "Open the full-size image", self, size=16
+        )
+        self.enlarge_btn.setFixedSize(28, 28)
+        self.enlarge_btn.setEnabled(False)
+        self.enlarge_btn.clicked.connect(self.enlarge_requested)
         header.addWidget(self.title_label)
         header.addStretch(1)
         header.addWidget(self.path_label)
+        header.addWidget(self.enlarge_btn)
         layout.addLayout(header)
 
         self._label = ClickableLabel()
@@ -738,6 +750,7 @@ class PreviewBox(QFrame):
         self._label.setText("(empty)")
         self._label.setCursor(Qt.PointingHandCursor)
         self._label.setToolTip("Click to enlarge")
+        self._label.clicked.connect(self.enlarge_requested)
         layout.addWidget(self._label, 1)
 
     # -- state --------------------------------------------------------------
@@ -746,11 +759,13 @@ class PreviewBox(QFrame):
         pix = QPixmap(path)
         if pix.isNull():
             self._label.setText("(cannot load preview)")
+            self.enlarge_btn.setEnabled(False)
             return False
         self._pixmap = pix
         self._path = path
         self._label.setText("")
         self.path_label.setText(os.path.basename(path))
+        self.enlarge_btn.setEnabled(True)
         self.refit()
         return True
 
@@ -758,6 +773,7 @@ class PreviewBox(QFrame):
         self._label.setPixmap(QPixmap())
         self._label.setText(text)
         self._pixmap = None
+        self.enlarge_btn.setEnabled(False)
 
     def clear(self) -> None:
         self._label.setPixmap(QPixmap())
@@ -765,6 +781,7 @@ class PreviewBox(QFrame):
         self.path_label.setText("")
         self._pixmap = None
         self._path = None
+        self.enlarge_btn.setEnabled(False)
 
     @property
     def path(self) -> Optional[str]:
@@ -791,6 +808,9 @@ class PreviewBox(QFrame):
 class PreviewPanel(QWidget):
     """Before/after previews plus the file metadata panel."""
 
+    #: Emits (which, panel) — "which" is "before" or "after".
+    enlarge_requested = Signal(str, object)
+
     def __init__(self, parent=None, show_result: bool = True) -> None:
         super().__init__(parent)
         self.show_result = show_result
@@ -802,6 +822,13 @@ class PreviewPanel(QWidget):
         row.setSpacing(12)
         self.before = PreviewBox("Original")
         self.after = PreviewBox("Result") if show_result else None
+        self.before.enlarge_requested.connect(
+            lambda: self.enlarge_requested.emit("before", self)
+        )
+        if self.after is not None:
+            self.after.enlarge_requested.connect(
+                lambda: self.enlarge_requested.emit("after", self)
+            )
         row.addWidget(self.before, 1)
         if self.after is not None:
             row.addWidget(self.after, 1)

@@ -371,6 +371,13 @@ class MainWindow(QMainWindow):
         self.verify_page.files.selection_changed.connect(self._on_source_selected)
         self.analyze_page.files.selection_changed.connect(self._on_source_selected)
 
+        # Click-to-enlarge: the preview panels ask the window to open the
+        # full-size viewer for whichever box was clicked.
+        for page in (self.encrypt_page, self.decrypt_page, self.verify_page):
+            page.preview.enlarge_requested.connect(
+                lambda which, panel: self._enlarge(which, panel)
+            )
+
         self.encrypt_page.start_btn.clicked.connect(lambda: self._start_job("encrypt"))
         self.encrypt_page.cancel_btn.clicked.connect(lambda: self._cancel_job("encrypt"))
         self.decrypt_page.start_btn.clicked.connect(lambda: self._start_job("decrypt"))
@@ -650,11 +657,14 @@ class MainWindow(QMainWindow):
         else:
             self._clear_preview("before")
 
-    def _enlarge(self, which: str) -> None:
+    def _enlarge(self, which: str, panel=None) -> None:
         """Open the enlarge viewer for a preview (click-to-enlarge)."""
-        page = self._current_page()
-        panel = getattr(page, "preview", None) or self.encrypt_page.preview
+        if panel is None:
+            page = self._current_page()
+            panel = getattr(page, "preview", None) or self.encrypt_page.preview
         box = panel.before if which == "before" else panel.after
+        if box is None:
+            return
         path = getattr(box, "_path", None)
         if not path:
             return
