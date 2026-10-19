@@ -40,12 +40,23 @@ def sample_image(tmp_path):
 
 def test_main_window_constructs(qapp):
     window = MainWindow()
-    assert window.tabs.count() == 3
-    assert [window.tabs.tabText(i) for i in range(3)] == [
-        "Encrypt",
-        "Decrypt",
-        "Analyze",
+    # The redesigned shell is a sidebar + a page stack (one page per real
+    # feature) instead of the old three-tab widget.
+    assert window.stack.count() == 8
+    keys = [window.stack.widget(i).key for i in range(window.stack.count())]
+    assert keys == [
+        "overview",
+        "encrypt",
+        "decrypt",
+        "verify",
+        "analyze",
+        "history",
+        "settings",
+        "about",
     ]
+    # The sidebar offers exactly those pages — no empty placeholders.
+    nav_keys = [b.key for b in window.sidebar._buttons]
+    assert nav_keys == keys
     # Device bar shows something for this machine.
     assert "Device:" in window.device_label.text()
     window.close()
@@ -271,7 +282,7 @@ def test_main_window_controls_carry_tooltips(qapp):
             (QPushButton, f"{mode}_cancel"),
             (QProgressBar, f"{mode}_progress"),
         ):
-            child = window.tabs.findChild(cls, name)
+            child = window.findChild(cls, name)
             assert child is not None, f"missing {name}"
             assert child.toolTip(), f"{name} has no tooltip"
     # File-list buttons: every button in every list is tipped.

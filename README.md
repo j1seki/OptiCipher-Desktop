@@ -32,33 +32,86 @@ acceleration and per-OS installers.
 Real captures from the running app (regenerate with
 `python packaging/screenshots.py`).
 
-**Encrypt tab** — sample loaded, encryption finished, before/after preview,
-KDF cost, live device bar:
+**Overview** — the home screen: quick actions, what this machine can do, and
+what has happened in this session:
 
-![OptiCipher Desktop — Encrypt tab](docs/screenshots/main-window.png)
+![OptiCipher Desktop — Overview](docs/screenshots/overview.png)
 
-**Analyze tab** — entropy, adjacent-pixel correlation, NPCR/UACI and the
+**Encrypt** — sample loaded, encryption finished, before/after preview and
+the KDF cost control:
+
+![OptiCipher Desktop — Encrypt](docs/screenshots/encrypt.png)
+
+**Decrypt** — a real decryption, reported step by step (authentication tag
+verified → output written → exact restoration) instead of one blanket
+"success":
+
+![OptiCipher Desktop — Decrypt](docs/screenshots/decrypt.png)
+
+**Verify integrity** — the authentication check for a ciphertext, with the
+technical details it was based on:
+
+![OptiCipher Desktop — Verify integrity](docs/screenshots/verify.png)
+
+**Analyze** — entropy, adjacent-pixel correlation, NPCR/UACI and the
 per-channel histogram for an original/ciphertext pair:
 
-![OptiCipher Desktop — Analyze tab](docs/screenshots/analyze.png)
+![OptiCipher Desktop — Analyze](docs/screenshots/analyze.png)
 
-**Settings dialog** — compute device, threads, RAM budget, PBKDF2 cost, and
+**Settings** — compute device, threads, RAM budget, PBKDF2 cost, theme, and
 what this machine offers:
 
-![OptiCipher Desktop — Settings dialog](docs/screenshots/settings.png)
+![OptiCipher Desktop — Settings](docs/screenshots/settings.png)
+
+### The interface
+
+The application is a sidebar shell around eight real screens — no
+placeholder pages, and no feature that is only a label:
+
+| Screen | What it does |
+|---|---|
+| **Overview** | quick actions, the live compute backend and its limits, and the session's activity |
+| **Encrypt** | batch encrypt with drag-and-drop, passphrase + confirmation, KDF cost, destination, live preview |
+| **Decrypt** | the same shape, plus a step-by-step outcome (authentication → write → exact restoration) |
+| **Verify** | read-only integrity check of a ciphertext, with the verdict and the technical details behind it |
+| **Analyze** | entropy, H/V/D adjacent correlation, NPCR/UACI, 256-bin per-channel histograms |
+| **History** | what happened in this session — in memory only, never written to disk |
+| **Settings** | compute device, threads, RAM budget, PBKDF2 cost, theme |
+| **About** | version, provenance, and the honest limits of the tool |
+
+Design system notes:
+
+- **One token set, two themes.** Every colour, radius and spacing value
+  lives in `app/theme.py`; the dark theme is the default and a light theme
+  is one palette away. The choice is remembered between runs.
+- **No inline stylesheets.** Components declare a *role* (an `objectName`)
+  and the generated stylesheet styles that role, so a component restyles
+  everywhere at once.
+- **No icon dependency.** The ~30 glyphs are drawn with `QPainter`
+  (`app/icons.py`) — crisp at any DPI, recoloured per theme, nothing extra
+  to vendor into the packaged build.
+- **Keyboard reachable.** `Alt+1`…`Alt+8` switch screens, every control has
+  an accessible name, and every control has a tooltip.
+- **Honest state.** A decryption only claims success when the
+  authentication tag verified *and* the output was written *and* the
+  restoration was exact — three separate rows. Verification without a
+  passphrase says "not authenticated" rather than "verified".
 
 ### What the desktop app adds
 
 | Feature | Details |
 |---|---|
-| **Encrypt / Decrypt / Analyze** | drag-and-drop, batch queues, before/after preview |
+| **Encrypt / Decrypt / Verify / Analyze** | drag-and-drop, batch queues, before/after preview |
 | **Metrics dashboard** | entropy, H/V/D adjacent correlation, NPCR/UACI, 256-bin histograms |
+| **Read-only integrity check** | verifies a ciphertext's HMAC-SHA256 tag without restoring it, and distinguishes "wrong passphrase or modified", "malformed", "unsupported format" and "not authenticated" |
 | **Compute device picker** | Auto / GPU / CPU, CPU thread count, RAM budget — Auto runs a one-time per-machine calibration and picks the faster backend |
 | **KDF cost slider** | PBKDF2 iterations (the format-legal cost knob; higher = slower brute-force, slower encrypt) |
 | **Background jobs** | every job runs on a worker thread with progress + cancel; the UI never blocks |
 | **Device info panel** | shows the exact GPU adapter and API in use (Metal / Vulkan / DX12) |
 | **SFTP output locations** | type `sftp://user@host[:port]/path` in the Output field and every result is also uploaded there as a size-verified copy; passwords are asked once per session and never saved to disk |
 | **Safe writes** | outputs are written atomically (temp → fsync → rename) and never overwrite an existing file — a numbered name (`_2`) is chosen instead; batch failures surface as one summary dialog, not one per file |
+| **Dark & light themes** | one token set, two palettes, remembered between runs; no white flash when switching |
+| **Session history** | a short, in-memory log of what you did — deliberately not persisted |
 
 ### Hardware acceleration, without breaking the format
 
@@ -411,8 +464,22 @@ OptiCipher/
 │       └── gpu.py           # WebGPU/WGSL kernels + adapter discovery
 ├── app/                     # (fork) PySide6 desktop application
 │   ├── main.py              # entry point (python -m app.main)
-│   ├── window.py            # main window, settings dialog
-│   ├── workers.py           # QThread job + analysis workers
+│   ├── window.py            # main window: shell + pages + job wiring
+│   ├── theme.py             # design tokens, dark/light palettes, stylesheet
+│   ├── icons.py             # QPainter-drawn icon set (no dependency)
+│   ├── widgets.py           # reusable components (cards, buttons, fields…)
+│   ├── shell.py             # sidebar + header bar
+│   ├── imaging.py           # image metadata + preview widgets
+│   ├── history.py           # in-memory session activity log
+│   ├── pages/               # one module per screen
+│   │   ├── overview.py      # home screen + quick actions
+│   │   ├── crypt.py         # encrypt & decrypt screens
+│   │   ├── verify.py        # integrity verification screen
+│   │   ├── analyze.py       # research metrics screen
+│   │   ├── history_page.py  # session log
+│   │   ├── settings_page.py # compute/crypto/appearance settings
+│   │   └── about.py         # version, provenance, limits
+│   ├── workers.py           # QThread job, analysis and verification workers
 │   ├── settings.py          # QSettings persistence → accel config
 │   ├── device.py            # CPU/RAM/GPU introspection
 │   ├── sftp.py              # sftp:// output locations (paramiko, session-only creds)
@@ -430,7 +497,8 @@ OptiCipher/
 │   ├── test_file_safety.py      # (fork) atomic, non-destructive writes
 │   ├── test_compat_matrix.py    # (fork) per-format matrix + golden vector
 │   ├── test_sftp.py             # (fork) SFTP outputs against a fake transport
-│   └── test_gui_smoke.py        # (fork) headless GUI wiring tests
+│   ├── test_gui_smoke.py        # (fork) headless GUI wiring tests
+│   └── test_ui_design.py        # (fork) design system, shell, page behaviour
 ├── samples/                 # the bundled "CLAUDE CODE" sample + outputs
 │   ├── sample_claude_code.png
 │   ├── sample_encrypted.png
@@ -620,7 +688,7 @@ pip install -e ".[app,dev]"  # pytest + GUI/GPU test deps
 pytest -v
 ```
 
-The suite (208 tests in this fork) covers each component in isolation, full
+The suite (239 tests in this fork) covers each component in isolation, full
 encrypt→decrypt round trips across many image shapes (including RGBA and
 degenerate 1×N images), Unicode passphrases, wrong-passphrase rejection, tamper
 detection, and the statistical behaviour on the real sample image — plus the
@@ -631,11 +699,19 @@ fork's parity layers:
 - `test_gpu_accel.py` — GPU golden-vector keystream parity vs OpenSSL and exact
   metric equality (auto-skips when no WebGPU adapter is present, e.g. CI).
 - `test_gui_smoke.py` — headless (offscreen) desktop-app wiring: window
-  construction, per-tab file lists, settings (+ tooltips), the Encrypt
-  tab's KDF slider wiring, worker round-trip, analysis report shape,
-  original+ciphertext pair alignment for NPCR/UACI, the preview/info
-  panel, the click-to-enlarge viewer, per-channel histogram colours,
-  broad tooltip coverage and the batch failure summary.
+  construction, the navigation shell, per-page file lists, settings
+  (+ tooltips), the Encrypt page's KDF slider wiring, worker round-trip,
+  analysis report shape, original+ciphertext pair alignment for NPCR/UACI,
+  the preview/info panel, the click-to-enlarge viewer, per-channel histogram
+  colours, broad tooltip coverage and the batch failure summary.
+- `test_ui_design.py` — the redesigned interface: the token system (every
+  colour in the stylesheet must come from a palette token), WCAG AA contrast
+  in both themes, theme switching + persistence, the navigation shell and
+  its keyboard shortcuts, minimum window size, tooltip coverage of every
+  control, the encrypt→decrypt round trip through the new pages, the
+  step-by-step decryption outcome (a failed step must never read as
+  success), the four verification verdicts, and the session-history
+  bookkeeping.
 - `test_integrity_matrix.py` — encrypt-then-MAC verification against every
   single-bit/field tamper, pinned format rules, and the no-oracle property
   (wrong passphrase ≡ tamper in the error message).

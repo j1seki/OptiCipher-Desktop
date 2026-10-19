@@ -45,6 +45,8 @@ from __future__ import annotations
 
 import hashlib
 import hmac as _hmac
+from dataclasses import dataclass
+from typing import Optional, Tuple
 
 import numpy as np
 
@@ -158,6 +160,93 @@ class DecryptionError(Exception):
     """
 
 
+class MalformedCiphertextError(DecryptionError):
+    """
+    A :class:`DecryptionError` raised for a structurally impossible file.
+
+    Same message as the generic integrity failure on purpose (a caller must
+    not learn which check tripped), but a distinct type so that
+    :func:`verify_image` can tell "this file cannot be a ciphertext" from
+    "this ciphertext did not authenticate" — two very different answers for
+    a user staring at a file.
+    """
+
+
+def _authenticate(
+    pixels: np.ndarray, passphrase: str
+) -> Tuple[header.Header, np.ndarray, keys.DerivedKeys]:
+    """
+    Steps 1-4 of :func:`decrypt_image`: validate, derive, strip, authenticate.
+
+    Returns the parsed header, the main ciphertext (the strip removed) and
+    the derived keys. The caller still has to undo the diffusion and the
+    scrambling.
+
+    Raises
+    ------
+    DecryptionError
+        If the authentication tag does not match (wrong passphrase, or the
+        file was modified).
+    MalformedCiphertextError
+        If the file cannot structurally be a ciphertext of this format.
+    """
+    # 1. The header sits at the TOP of the reserved strip, i.e. the leading bytes
+    #    of the final rows. Read a candidate region big enough for the fixed
+    #    header and parse it (this also yields strip_rows).
+    candidate = stego.peek_header_bytes(pixels, header.HEADER_SIZE)
+    hdr = header.parse(candidate)  # raises ValueError on bad magic/size
+
+    # 1b. Cheap plausibility bounds on UNTRUSTED header fields BEFORE any
+    #     expensive or structural work. None of these values are authenticated
+    #     yet, so an attacker must not be able to force large CPU/memory cost
+    #     ahead of the HMAC check (the iterations field alone could otherwise
+    #     stall a victim for hours in PBKDF2). Genuine v1 files sit far below
+    #     every bound; a file failing here is corrupt or crafted, and the
+    #     generic error keeps the wrong-passphrase/tamper distinction hidden.
+    if hdr.iterations <= 0 or hdr.iterations > keys.MAX_UNVERIFIED_ITERATIONS:
+        raise MalformedCiphertextError(
+            "integrity check failed: wrong passphrase or the file was modified."
+        )
+    if hdr.channels not in (3, 4) or hdr.width <= 0 or hdr.height <= 0:
+        raise MalformedCiphertextError(
+            "integrity check failed: wrong passphrase or the file was modified."
+        )
+    h_img, w_img = pixels.shape[0], pixels.shape[1]
+    if hdr.strip_rows <= 0 or hdr.strip_rows >= h_img:
+        raise MalformedCiphertextError(
+            "integrity check failed: wrong passphrase or the file was modified."
+        )
+    # A valid strip holds at least a full header plus one row's worth of room
+    # rounding; reject strip sizes that could not have been produced by the
+    # format (rows_needed is ceil(HEADER_SIZE / (width * channels))).
+    max_strip = stego.rows_needed(header.HEADER_SIZE, w_img, hdr.channels) + 1
+    if hdr.strip_rows > max_strip:
+        raise MalformedCiphertextError(
+            "integrity check failed: wrong passphrase or the file was modified."
+        )
+
+    # 2. Re-derive keys from passphrase + embedded salt/iterations.
+    derived = keys.derive_keys(passphrase, hdr.salt, hdr.iterations)
+
+    # 3. Remove the reserved strip to recover the main ciphertext exactly.
+    main_cipher = stego.remove_strip(pixels, hdr.strip_rows)
+
+    # Sanity-check the recovered dimensions against the authenticated header.
+    if main_cipher.shape[:2] != (hdr.height, hdr.width):
+        raise DecryptionError(
+            "image dimensions do not match the embedded header (corrupted file)."
+        )
+
+    # 4. Verify integrity / passphrase via HMAC over the main ciphertext.
+    expected = _compute_hmac(derived.mac_key, hdr.pack_prehmac(), main_cipher)
+    if not _hmac.compare_digest(expected, hdr.hmac):
+        raise DecryptionError(
+            "integrity check failed: wrong passphrase or the file was modified."
+        )
+
+    return hdr, main_cipher, derived
+
+
 def decrypt_image(pixels: np.ndarray, passphrase: str) -> np.ndarray:
     """
     Decrypt an OptiCipher ciphertext image back to its exact original.
@@ -186,59 +275,10 @@ def decrypt_image(pixels: np.ndarray, passphrase: str) -> np.ndarray:
     if pixels.ndim != 3 or pixels.shape[2] not in (3, 4):
         raise ValueError("pixels must have shape (H, W, 3) or (H, W, 4)")
 
-    # 1. The header sits at the TOP of the reserved strip, i.e. the leading bytes
-    #    of the final rows. Read a candidate region big enough for the fixed
-    #    header and parse it (this also yields strip_rows).
-    candidate = stego.peek_header_bytes(pixels, header.HEADER_SIZE)
-    hdr = header.parse(candidate)  # raises ValueError on bad magic/size
-
-    # 1b. Cheap plausibility bounds on UNTRUSTED header fields BEFORE any
-    #     expensive or structural work. None of these values are authenticated
-    #     yet, so an attacker must not be able to force large CPU/memory cost
-    #     ahead of the HMAC check (the iterations field alone could otherwise
-    #     stall a victim for hours in PBKDF2). Genuine v1 files sit far below
-    #     every bound; a file failing here is corrupt or crafted, and the
-    #     generic error keeps the wrong-passphrase/tamper distinction hidden.
-    if hdr.iterations <= 0 or hdr.iterations > keys.MAX_UNVERIFIED_ITERATIONS:
-        raise DecryptionError(
-            "integrity check failed: wrong passphrase or the file was modified."
-        )
-    if hdr.channels not in (3, 4) or hdr.width <= 0 or hdr.height <= 0:
-        raise DecryptionError(
-            "integrity check failed: wrong passphrase or the file was modified."
-        )
-    h_img, w_img = pixels.shape[0], pixels.shape[1]
-    if hdr.strip_rows <= 0 or hdr.strip_rows >= h_img:
-        raise DecryptionError(
-            "integrity check failed: wrong passphrase or the file was modified."
-        )
-    # A valid strip holds at least a full header plus one row's worth of room
-    # rounding; reject strip sizes that could not have been produced by the
-    # format (rows_needed is ceil(HEADER_SIZE / (width * channels))).
-    max_strip = stego.rows_needed(header.HEADER_SIZE, w_img, hdr.channels) + 1
-    if hdr.strip_rows > max_strip:
-        raise DecryptionError(
-            "integrity check failed: wrong passphrase or the file was modified."
-        )
-
-    # 2. Re-derive keys from passphrase + embedded salt/iterations.
-    derived = keys.derive_keys(passphrase, hdr.salt, hdr.iterations)
-
-    # 3. Remove the reserved strip to recover the main ciphertext exactly.
-    main_cipher = stego.remove_strip(pixels, hdr.strip_rows)
-
-    # Sanity-check the recovered dimensions against the authenticated header.
-    if main_cipher.shape[:2] != (hdr.height, hdr.width):
-        raise DecryptionError(
-            "image dimensions do not match the embedded header (corrupted file)."
-        )
-
-    # 4. Verify integrity / passphrase via HMAC over the main ciphertext.
-    expected = _compute_hmac(derived.mac_key, hdr.pack_prehmac(), main_cipher)
-    if not _hmac.compare_digest(expected, hdr.hmac):
-        raise DecryptionError(
-            "integrity check failed: wrong passphrase or the file was modified."
-        )
+    # 1-4. Parse the header, re-derive the keys, strip the reserved rows and
+    #      verify the HMAC. Raises DecryptionError when the file does not
+    #      authenticate.
+    hdr, main_cipher, derived = _authenticate(pixels, passphrase)
 
     # 4b. Every header field is now authenticated, the format version included.
     #     Only against a verified HMAC is a version decision safe (a tampered
@@ -259,3 +299,180 @@ def decrypt_image(pixels: np.ndarray, passphrase: str) -> np.ndarray:
     restored = get_backend().unscramble(undiffused, derived.scramble_seed)
 
     return restored
+
+
+# ---------------------------------------------------------------------------
+# Public API: verification.
+# ---------------------------------------------------------------------------
+#: The states :func:`verify_image` can report.
+VERIFY_VERIFIED = "verified"
+VERIFY_FAILED = "failed"
+VERIFY_MALFORMED = "malformed"
+VERIFY_UNSUPPORTED_FORMAT = "unsupported_format"
+VERIFY_UNSUPPORTED_VERSION = "unsupported_version"
+VERIFY_UNAUTHENTICATED = "unauthenticated"
+
+
+@dataclass(frozen=True)
+class VerificationResult:
+    """
+    The outcome of an integrity check.
+
+    Attributes
+    ----------
+    status:
+        One of the ``VERIFY_*`` constants above.
+    authenticated:
+        True only when the file's HMAC-SHA256 tag was checked AND matched.
+    message:
+        A short, human-readable explanation.
+    version / iterations / width / height / channels / strip_rows:
+        The authenticated (or, for a failed check, merely parsed) header
+        fields, when they could be read.
+    """
+
+    status: str
+    authenticated: bool
+    message: str
+    version: Optional[int] = None
+    iterations: Optional[int] = None
+    width: Optional[int] = None
+    height: Optional[int] = None
+    channels: Optional[int] = None
+    strip_rows: Optional[int] = None
+
+    @property
+    def ok(self) -> bool:
+        """True only for a fully authenticated file."""
+        return self.status == VERIFY_VERIFIED and self.authenticated
+
+    def as_dict(self) -> dict:
+        """A plain-data view (handy for Qt signals and JSON)."""
+        return {
+            "status": self.status,
+            "authenticated": self.authenticated,
+            "message": self.message,
+            "version": self.version,
+            "iterations": self.iterations,
+            "width": self.width,
+            "height": self.height,
+            "channels": self.channels,
+            "strip_rows": self.strip_rows,
+            "ok": self.ok,
+        }
+
+
+def verify_image(
+    pixels: np.ndarray, passphrase: Optional[str] = None
+) -> VerificationResult:
+    """
+    Check an image's format and (with a passphrase) its integrity.
+
+    This is a *read-only* check: it never writes anything and never
+    reconstructs the plaintext, so it is safe to run on any file.
+
+    Without a passphrase the format is still recognised and reported, but the
+    result is explicitly "unauthenticated" — a file's mere resemblance to an
+    OptiCipher ciphertext says nothing about its integrity.
+
+    With a passphrase the HMAC-SHA256 tag is verified exactly the way
+    :func:`decrypt_image` verifies it, so a "verified" verdict means the
+    ciphertext is bit-for-bit what its passphrase authenticated.
+
+    Returns
+    -------
+    VerificationResult
+        The state, plus the header fields when they could be read.
+    """
+    if pixels.dtype != np.uint8:
+        raise ValueError("pixels must be a uint8 array")
+    if pixels.ndim != 3 or pixels.shape[2] not in (3, 4):
+        raise ValueError("pixels must have shape (H, W, 3) or (H, W, 4)")
+
+    # -- 1. Is this an OptiCipher file at all? ----------------------------
+    try:
+        candidate = stego.peek_header_bytes(pixels, header.HEADER_SIZE)
+    except Exception:  # noqa: BLE001 - unreadable pixels are just "not ours"
+        candidate = b""
+    if len(candidate) < header.HEADER_SIZE:
+        return VerificationResult(
+            VERIFY_MALFORMED,
+            False,
+            "The file is too small to contain an OptiCipher header.",
+        )
+    try:
+        hdr = header.parse(candidate)
+    except ValueError:
+        return VerificationResult(
+            VERIFY_UNSUPPORTED_FORMAT,
+            False,
+            "Not an OptiCipher image — the file has no OptiCipher header.",
+        )
+
+    info = {
+        "version": hdr.version,
+        "iterations": hdr.iterations,
+        "width": hdr.width,
+        "height": hdr.height,
+        "channels": hdr.channels,
+        "strip_rows": hdr.strip_rows,
+    }
+
+    # -- 2. Without a passphrase we can say what the file IS, not whether
+    #       it is intact. Say exactly that. -------------------------------
+    if passphrase is None:
+        return VerificationResult(
+            VERIFY_UNAUTHENTICATED,
+            False,
+            "OptiCipher format recognised, but no passphrase was supplied, "
+            "so the authentication tag was NOT checked.",
+            **info,
+        )
+
+    # -- 3. Authenticate. --------------------------------------------------
+    try:
+        _authenticate(pixels, passphrase)
+    except MalformedCiphertextError:
+        return VerificationResult(
+            VERIFY_MALFORMED,
+            False,
+            "The file is structurally invalid for the OptiCipher format — it "
+            "is corrupt, or it was deliberately crafted.",
+            **info,
+        )
+    except DecryptionError as exc:
+        message = str(exc)
+        if "dimensions do not match" in message:
+            return VerificationResult(
+                VERIFY_MALFORMED,
+                False,
+                "The image dimensions do not match the embedded header "
+                "(corrupted file).",
+                **info,
+            )
+        return VerificationResult(
+            VERIFY_FAILED,
+            False,
+            "The authentication tag did not match: the passphrase is wrong, "
+            "or the file was modified after it was encrypted.",
+            **info,
+        )
+
+    # -- 4. Authenticated. Only now is the version field trustworthy. -----
+    if hdr.version != header.VERSION:
+        return VerificationResult(
+            VERIFY_UNSUPPORTED_VERSION,
+            False,
+            f"This file uses OptiCipher format version {hdr.version}; this "
+            f"build reads version {header.VERSION}. Update OptiCipher to "
+            "open it.",
+            **info,
+        )
+
+    return VerificationResult(
+        VERIFY_VERIFIED,
+        True,
+        "Verified — the file's authentication tag matches its passphrase "
+        "(HMAC-SHA256 over the ciphertext and the header).",
+        **info,
+    )

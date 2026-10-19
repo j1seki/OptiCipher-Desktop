@@ -82,6 +82,16 @@ class AppSettings:
     def output_dir(self, value: str) -> None:
         self._s.setValue("paths/output", value)
 
+    # -- appearance ---------------------------------------------------------
+    @property
+    def theme(self) -> str:
+        """The user's theme choice: "dark" (default) or "light"."""
+        return str(self._s.value("ui/theme", "dark"))
+
+    @theme.setter
+    def theme(self, value: str) -> None:
+        self._s.setValue("ui/theme", str(value))
+
     # -- sync to library ----------------------------------------------------
     def apply_to_accel(self) -> None:
         """

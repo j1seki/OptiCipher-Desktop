@@ -31,7 +31,14 @@ from typing import Dict, List, Optional, Tuple
 import numpy as np
 from PySide6.QtCore import QThread, Signal
 
-from opticipher import DecryptionError, decrypt_image, encrypt_image, load_image, save_image
+from opticipher import (
+    DecryptionError,
+    decrypt_image,
+    encrypt_image,
+    load_image,
+    save_image,
+    verify_image,
+)
 from opticipher import accel
 from opticipher import header as _header
 from opticipher import metrics as ref_metrics
@@ -334,3 +341,72 @@ def _entropy_from_counts(counts: np.ndarray) -> float:
     probs = counts.astype(np.float64) / total
     nz = probs[probs > 0]
     return float(-np.sum(nz * np.log2(nz)))
+
+
+# ---------------------------------------------------------------------------
+# Verification worker.
+# ---------------------------------------------------------------------------
+class VerifyWorker(QThread):
+    """
+    Check one file's format and (with a passphrase) its integrity.
+
+    Read-only: it never writes anything and never reconstructs the plaintext.
+    The payload is a plain dict so the page can render it without knowing
+    anything about the library:
+
+        {
+          "path": str,
+          "status": str,          # one of opticipher.core.VERIFY_*
+          "authenticated": bool,
+          "ok": bool,
+          "message": str,
+          "version": int | None,
+          "iterations": int | None,
+          "width": int | None,
+          "height": int | None,
+          "channels": int | None,
+          "strip_rows": int | None,
+          "size": int,            # file size in bytes
+          "sha256": str,          # digest of the file as stored
+        }
+    """
+
+    result = Signal(dict)
+    failed = Signal(str)
+
+    def __init__(
+        self, path: str, passphrase: str | None = None, parent=None
+    ) -> None:
+        super().__init__(parent)
+        self.path = path
+        self.passphrase = passphrase
+
+    def run(self) -> None:  # executes in the worker thread
+        try:
+            pixels = load_image(self.path)
+            outcome = verify_image(pixels, self.passphrase)
+            payload = outcome.as_dict()
+            payload["path"] = self.path
+            try:
+                payload["size"] = os.path.getsize(self.path)
+            except OSError:
+                payload["size"] = 0
+            payload["sha256"] = _file_sha256(self.path)
+            self.result.emit(payload)
+        except Exception as exc:  # noqa: BLE001 - surface to the UI
+            traceback.print_exc()
+            self.failed.emit(str(exc))
+
+
+def _file_sha256(path: str) -> str:
+    """SHA-256 of the file as stored on disk (hex digest)."""
+    import hashlib
+
+    digest = hashlib.sha256()
+    try:
+        with open(path, "rb") as handle:
+            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                digest.update(chunk)
+    except OSError:
+        return ""
+    return digest.hexdigest()

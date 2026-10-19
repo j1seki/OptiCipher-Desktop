@@ -11,6 +11,7 @@ Public API
 ----------
     encrypt_image(pixels, passphrase, iterations=...) -> np.ndarray
     decrypt_image(pixels, passphrase)                 -> np.ndarray
+    verify_image(pixels, passphrase=None)             -> VerificationResult
     DecryptionError                                   (exception)
 
 Plus convenient file helpers:
@@ -23,13 +24,23 @@ See the project README for the full algorithm description, threat model, and
 metric definitions.
 """
 
-from .core import DecryptionError, decrypt_image, encrypt_image
+from .core import (
+    DecryptionError,
+    MalformedCiphertextError,
+    VerificationResult,
+    decrypt_image,
+    encrypt_image,
+    verify_image,
+)
 from .io_image import load_image, save_image
 
 __all__ = [
     "encrypt_image",
     "decrypt_image",
+    "verify_image",
+    "VerificationResult",
     "DecryptionError",
+    "MalformedCiphertextError",
     "load_image",
     "save_image",
 ]

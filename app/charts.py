@@ -36,6 +36,29 @@ CHANNEL_LABELS = {
     "channel_3": "Alpha (channel 3)",
 }
 
+#: Colours the chart widgets paint with. Seeded with the dark palette and
+#: refreshed by :func:`set_theme_colors` whenever the theme changes, so the
+#: charts follow the rest of the application instead of staying dark in a
+#: light window.
+_THEME = {
+    "panel": "#151922",
+    "border": "#2B3240",
+    "track": "#1B202A",
+    "text": "#F1F4F8",
+    "fill": "#38D6A3",
+    "ideal": "#46D68A",
+}
+
+
+def set_theme_colors(palette) -> None:
+    """Point the chart colours at the active design palette."""
+    _THEME["panel"] = palette.surface_alt
+    _THEME["border"] = palette.border
+    _THEME["track"] = palette.surface
+    _THEME["text"] = palette.text
+    _THEME["fill"] = palette.accent
+    _THEME["ideal"] = palette.success
+
 
 class HistogramBars(QWidget):
     """A 256-bin histogram; bars scaled to the max bin (sqrt scale keeps
@@ -69,7 +92,7 @@ class HistogramBars(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing, False)
         rect = self.rect().adjusted(2, 2, -2, -2)
-        painter.fillRect(rect, QColor(24, 26, 32))
+        painter.fillRect(rect, QColor(_THEME["panel"]))
         if not self._counts or max(self._counts) == 0:
             painter.end()
             return
@@ -87,7 +110,7 @@ class HistogramBars(QWidget):
             painter.drawRect(
                 int(x), int(rect.bottom() - h) + 1, max(1, int(bar_w)), int(h)
             )
-        painter.setPen(QPen(QColor(70, 74, 84)))
+        painter.setPen(QPen(QColor(_THEME["border"])))
         painter.drawRect(rect)
         painter.end()
 
@@ -111,7 +134,7 @@ class ValueBar(QWidget):
         painter = QPainter(self)
         rect = self.rect()
         text_rect = rect.adjusted(8, 0, -8, 0)
-        painter.setPen(QColor(210, 214, 222))
+        painter.setPen(QColor(_THEME["text"]))
         painter.drawText(
             text_rect, Qt.AlignVCenter | Qt.AlignLeft, f"{self.label}"
         )
@@ -123,18 +146,18 @@ class ValueBar(QWidget):
             )
         # track
         track = rect.adjusted(150, 6, -60, -6)
-        painter.fillRect(track, QColor(38, 41, 49))
+        painter.fillRect(track, QColor(_THEME["track"]))
         if self.ideal:
             lo, hi = self.ideal
             band = track.adjusted(
                 int(track.width() * lo / self.maximum), 0,
                 -int(track.width() * (1 - hi / self.maximum)), 0,
             )
-            painter.fillRect(band, QColor(70, 120, 90, 90))
+            painter.fillRect(band, QColor(_THEME["ideal"]))
         if self.value is not None:
             frac = max(0.0, min(1.0, self.value / self.maximum))
             fill = track.adjusted(0, 0, -int(track.width() * (1 - frac)), 0)
-            painter.fillRect(fill, QColor(90, 170, 255))
-        painter.setPen(QPen(QColor(70, 74, 84)))
+            painter.fillRect(fill, QColor(_THEME["fill"]))
+        painter.setPen(QPen(QColor(_THEME["border"])))
         painter.drawRect(track)
         painter.end()
