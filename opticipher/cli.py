@@ -60,8 +60,11 @@ def _cmd_encrypt(args: argparse.Namespace) -> int:
     passphrase = _get_passphrase(args.passphrase, confirm=True)
     pixels = load_image(args.input)
     encrypted = encrypt_image(pixels, passphrase, iterations=args.iterations)
-    save_image(encrypted, args.output)
-    print(f"encrypted -> {args.output}  (shape {encrypted.shape})")
+    written = save_image(encrypted, args.output)
+    # Report the path actually written: save_image forces .png and picks a
+    # non-clobbering name when the requested one exists.
+    note = "" if str(written) == args.output else f"  (requested {args.output})"
+    print(f"encrypted -> {written}{note}  (shape {encrypted.shape})")
     return 0
 
 
@@ -77,8 +80,9 @@ def _cmd_decrypt(args: argparse.Namespace) -> int:
     except ValueError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
-    save_image(restored, args.output)
-    print(f"decrypted -> {args.output}  (shape {restored.shape})")
+    written = save_image(restored, args.output)
+    note = "" if str(written) == args.output else f"  (requested {args.output})"
+    print(f"decrypted -> {written}{note}  (shape {restored.shape})")
     return 0
 
 
@@ -88,6 +92,19 @@ def _cmd_metrics(args: argparse.Namespace) -> int:
     report = metrics.full_report(pixels)
     print(json.dumps(report, indent=2))
     return 0
+
+
+def _iterations_arg(value: str) -> int:
+    """argparse type: PBKDF2 iterations must fit the header's uint32 field."""
+    try:
+        parsed = int(value, 10)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"not an integer: {value!r}") from None
+    if not (0 < parsed <= 0xFFFFFFFF):
+        raise argparse.ArgumentTypeError(
+            f"iterations must be in 1..{0xFFFFFFFF}, got {parsed}"
+        )
+    return parsed
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -113,9 +130,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_enc.add_argument(
         "--iterations",
-        type=int,
+        type=_iterations_arg,
         default=DEFAULT_ITERATIONS,
-        help=f"PBKDF2 iterations (default {DEFAULT_ITERATIONS})",
+        help=f"PBKDF2 iterations, 1..{0xFFFFFFFF} (default {DEFAULT_ITERATIONS})",
     )
     p_enc.set_defaults(func=_cmd_encrypt)
 

@@ -35,6 +35,15 @@ hiddenimports = (
     + collect_submodules("opticipher")
     + collect_submodules("app")
 )
+# app/sftp.py imports paramiko LAZILY (so the app starts and --smoke passes
+# even without it), which PyInstaller's static analysis cannot see. Collect it
+# — plus its key-cryptography backends — when present, so packaged releases
+# ship working sftp:// outputs. Absent in a bare dev install: skip quietly.
+import importlib.util as _ilu  # noqa: E402
+
+for _pkg in ("paramiko", "bcrypt", "nacl"):
+    if _ilu.find_spec(_pkg) is not None:
+        hiddenimports += collect_submodules(_pkg)
 datas = collect_data_files("wgpu")
 binaries = collect_dynamic_libs("wgpu")
 

@@ -246,3 +246,128 @@ def test_preview_click_opens_viewer(qapp, sample_image, monkeypatch):
     assert seen.get("exec")
     assert "before" in seen.get("title", "")
     window.close()
+
+
+def test_main_window_controls_carry_tooltips(qapp):
+    """
+    Broad tooltip coverage: the whole primary surface explains itself on
+    hover — passphrase, output, actions, list controls, device bar, analyze.
+    (Reported gap: only the technical Settings rows had tips.)"
+    """
+    window = MainWindow()
+    checks = [
+        window._encrypt_pass,
+        window._encrypt_confirm,
+        window._encrypt_out,
+        window._enc_iter_slider,
+        window.device_label,
+        window.hist_channel,
+        window.hist_widget,
+    ]
+    for mode in ("encrypt", "decrypt"):
+        checks.append(getattr(window, f"_{mode}_pass"))
+        checks.append(getattr(window, f"_{mode}_out"))
+    for widget in checks:
+        assert widget.toolTip(), f"{widget} has no tooltip"
+    # Start/Cancel + progress bars (objectName lookup, as the app does).
+    from PySide6.QtWidgets import QProgressBar, QPushButton
+
+    for mode in ("encrypt", "decrypt"):
+        for cls, name in (
+            (QPushButton, f"{mode}_start"),
+            (QPushButton, f"{mode}_cancel"),
+            (QProgressBar, f"{mode}_progress"),
+        ):
+            child = window.tabs.findChild(cls, name)
+            assert child is not None, f"missing {name}"
+            assert child.toolTip(), f"{name} has no tooltip"
+    # File-list buttons: every button in every list is tipped.
+    for files in window.file_lists.values():
+        buttons = files.findChildren(QPushButton)
+        assert buttons
+        for btn in buttons:
+            assert btn.toolTip(), f"list button '{btn.text()}' has no tooltip"
+    window.close()
+
+
+def test_histogram_uses_per_channel_colors_and_labels(qapp):
+    """
+    Histogram bars must follow the displayed channel (red/green/blue/amber),
+    and the channel combo must say which channel is shown in plain words.
+    """
+    from app.charts import HistogramBars
+
+    # widget-level colour mapping
+    bar = HistogramBars()
+    bar.set_counts([1] * 256, key="channel_0")
+    assert bar.bar_color.name() == "#f45f5f"  # red
+    bar.set_counts([1] * 256, key="channel_1")
+    assert bar.bar_color.name() == "#60d678"  # green
+    bar.set_counts([1] * 256, key="channel_2")
+    assert bar.bar_color.name() == "#5aaaff"  # blue
+    bar.set_counts([1] * 256)  # no key -> default blue
+    assert bar.bar_color.name() == "#5aaaff"
+
+    # window-level: labels + data + live colour after a real analyze payload
+    window = MainWindow()
+    payload = {
+        "header": None,
+        "entropy": {"channel_0": 7.9, "mean": 7.9},
+        "npcr": None,
+        "uaci": None,
+        "correlation": {
+            "channel_0": {"horizontal": 0.1, "vertical": 0.1, "diagonal": 0.1}
+        },
+        "histograms": {
+            "channel_0": [1] * 256,
+            "channel_1": [2] * 256,
+            "channel_2": [3] * 256,
+            "channel_3": [4] * 256,
+        },
+        "backend": "cpu",
+    }
+    window._on_analyze_result(payload)
+    texts = [window.hist_channel.itemText(i) for i in range(4)]
+    assert texts == [
+        "Red (channel 0)",
+        "Green (channel 1)",
+        "Blue (channel 2)",
+        "Alpha (channel 3)",
+    ]
+    assert window.hist_channel.currentData() == "channel_0"
+    assert window.hist_widget.bar_color.name() == "#f45f5f"
+    assert window.hist_widget._counts == [1] * 256
+    window.hist_channel.setCurrentIndex(2)  # fires _update_hist
+    assert window.hist_widget.bar_color.name() == "#5aaaff"
+    assert window.hist_widget._counts == [3] * 256
+    window.close()
+
+
+def test_batch_failures_reported_once_not_per_file(qapp, monkeypatch):
+    """
+    A batch with many failures must not pop one modal dialog per file; the
+    errors collect during the run and surface as a single summary at the end.
+    """
+    import app.window as wmod
+
+    warnings = []
+    monkeypatch.setattr(
+        wmod.QMessageBox,
+        "warning",
+        staticmethod(lambda *a, **k: warnings.append(a)),
+    )
+    window = MainWindow()
+    window._job_failures = []
+    for i in range(3):
+        window._on_file_done(f"/tmp/bad_{i}.png", "error: integrity check failed")
+    assert warnings == [], "per-file dialogs must not appear during the batch"
+
+    window._on_all_done("encrypt", ok=4, bad=3)
+    assert len(warnings) == 1, "exactly one summary dialog at the end"
+    text = warnings[0][2]  # QMessageBox.warning(parent, title, text)
+    assert "3 failed" in text
+    assert "bad_0.png" in text and "bad_2.png" in text
+    assert "integrity check failed" in text
+    # Failures are cleared so the next batch starts fresh.
+    assert window._job_failures == []
+    window.close()

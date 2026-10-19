@@ -57,6 +57,8 @@ what this machine offers:
 | **KDF cost slider** | PBKDF2 iterations (the format-legal cost knob; higher = slower brute-force, slower encrypt) |
 | **Background jobs** | every job runs on a worker thread with progress + cancel; the UI never blocks |
 | **Device info panel** | shows the exact GPU adapter and API in use (Metal / Vulkan / DX12) |
+| **SFTP output locations** | type `sftp://user@host[:port]/path` in the Output field and every result is also uploaded there as a size-verified copy; passwords are asked once per session and never saved to disk |
+| **Safe writes** | outputs are written atomically (temp → fsync → rename) and never overwrite an existing file — a numbered name (`_2`) is chosen instead; batch failures surface as one summary dialog, not one per file |
 
 ### Hardware acceleration, without breaking the format
 
@@ -79,6 +81,30 @@ byte-identical output to the upstream reference implementation.
 OpenSSL golden vectors across block boundaries and sizes — any single-byte
 drift fails CI before it can touch a user's file. Measured numbers and their
 honest interpretation live in [docs/BENCHMARKS.md](docs/BENCHMARKS.md).
+
+### Integrity & file-safety guarantees
+
+The reliability audit (phases 1–13) turned every promise into an executable
+test. The full, normative specification — header layout, authenticated
+regions, reader obligations, error semantics, the format-compatibility
+matrix and a golden test vector that pins the v1 ciphertext bytes — is
+[docs/FORMAT.md](docs/FORMAT.md). The headline rules:
+
+- **Encrypt-then-MAC, verified before output.** HMAC-SHA256 covers every
+  header field and every payload byte; decryption refuses to produce pixels
+  that failed the check, and a wrong passphrase and a tampered file are
+  deliberately indistinguishable (no password oracle).
+- **No unbounded pre-auth work.** A crafted header cannot force hours of
+  PBKDF2: iteration counts, dimensions and strip geometry are bounds-checked
+  *before* key derivation (`tests/test_corruption.py`).
+- **Pixel-exact, not byte-exact.** Restored pixels equal the original
+  decode; the restored *file* is a fresh PNG (EXIF/ICC/palette are not
+  preserved — `tests/test_compat_matrix.py` pins this per format, including
+  that a JPEG re-encode of ciphertext is **detected**, never silently
+  accepted).
+- **Atomic, non-destructive saves.** Temp file → fsync → rename; existing
+  files are never clobbered; a failed save leaves the previous file intact
+  and no partial output (`tests/test_file_safety.py`).
 
 ### Installation (desktop app)
 
@@ -154,7 +180,11 @@ pyinstaller packaging/opticipher-desktop.spec --noconfirm
 3. Optionally adjust the **KDF cost** slider — higher costs more to encrypt
    and far more to attack; 200,000 iterations is the default.
 4. Optionally pick an **Output** folder; empty means "next to the input",
-   writing `<name>_encrypted.png`.
+   writing `<name>_encrypted.png`. You can also type an SFTP location
+   (`sftp://user@server.example.com/remote/dir`) — a login dialog asks for
+   the password once per session (kept in memory only, never written to
+   settings or disk), and each result is uploaded there as a verified copy
+   while the local file is kept.
 5. Press **Start**. The progress bar and the *before → after* preview update
    live; the status bar reports how many files succeeded.
 
@@ -385,6 +415,7 @@ OptiCipher/
 │   ├── workers.py           # QThread job + analysis workers
 │   ├── settings.py          # QSettings persistence → accel config
 │   ├── device.py            # CPU/RAM/GPU introspection
+│   ├── sftp.py              # sftp:// output locations (paramiko, session-only creds)
 │   └── charts.py            # histogram & metric bar widgets
 ├── packaging/               # (fork) PyInstaller spec, icons, entry
 ├── .github/workflows/       # (fork) 3-OS CI build + smoke tests
@@ -394,6 +425,11 @@ OptiCipher/
 │   ├── test_metrics_and_sample.py
 │   ├── test_accel.py            # (fork) CPU-backend parity vs reference
 │   ├── test_gpu_accel.py        # (fork) GPU golden-vector parity
+│   ├── test_integrity_matrix.py # (fork) MAC/tamper matrix, format rules
+│   ├── test_corruption.py       # (fork) hostile/corrupt file handling
+│   ├── test_file_safety.py      # (fork) atomic, non-destructive writes
+│   ├── test_compat_matrix.py    # (fork) per-format matrix + golden vector
+│   ├── test_sftp.py             # (fork) SFTP outputs against a fake transport
 │   └── test_gui_smoke.py        # (fork) headless GUI wiring tests
 ├── samples/                 # the bundled "CLAUDE CODE" sample + outputs
 │   ├── sample_claude_code.png
@@ -406,6 +442,7 @@ OptiCipher/
 ├── docs/                    # extra documentation
 │   ├── ALGORITHM.md
 │   ├── METRICS.md
+│   ├── FORMAT.md               # (fork) v1 format spec + guarantees matrix
 │   └── BENCHMARKS.md        # (fork) acceleration benchmark report
 ├── pyproject.toml           # packaging / install metadata
 ├── requirements.txt
@@ -583,7 +620,7 @@ pip install -e ".[app,dev]"  # pytest + GUI/GPU test deps
 pytest -v
 ```
 
-The suite (105 tests in this fork) covers each component in isolation, full
+The suite (208 tests in this fork) covers each component in isolation, full
 encrypt→decrypt round trips across many image shapes (including RGBA and
 degenerate 1×N images), Unicode passphrases, wrong-passphrase rejection, tamper
 detection, and the statistical behaviour on the real sample image — plus the
@@ -597,7 +634,22 @@ fork's parity layers:
   construction, per-tab file lists, settings (+ tooltips), the Encrypt
   tab's KDF slider wiring, worker round-trip, analysis report shape,
   original+ciphertext pair alignment for NPCR/UACI, the preview/info
-  panel and the click-to-enlarge viewer.
+  panel, the click-to-enlarge viewer, per-channel histogram colours,
+  broad tooltip coverage and the batch failure summary.
+- `test_integrity_matrix.py` — encrypt-then-MAC verification against every
+  single-bit/field tamper, pinned format rules, and the no-oracle property
+  (wrong passphrase ≡ tamper in the error message).
+- `test_corruption.py` — garbage/truncated/hostile files, pre-auth resource
+  bounds (crafted iteration counts rejected in milliseconds, not hours).
+- `test_file_safety.py` — atomic writes, non-clobbering outputs, original
+  files untouched, failed-save recovery, unicode paths, batch reruns.
+- `test_compat_matrix.py` — the per-format compatibility matrix (PNG JPEG
+  BMP TIFF WebP-lossless GIF, L/P/CMYK/RGBA modes), metadata-loss pins,
+  ZIP/copy/rename transformations, JPEG-re-encode detection, and the v1
+  golden ciphertext vector.
+- `test_sftp.py` — SFTP URL parsing, `.part` staging + size verification,
+  rename fallback, mirror-upload semantics, credential hygiene (fake
+  transport; no network).
 
 Every encrypted file in these tests is checked for bit-exact compatibility with
 the upstream algorithm in both directions — the format promise is a test, not

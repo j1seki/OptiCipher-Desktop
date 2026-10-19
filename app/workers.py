@@ -109,6 +109,8 @@ class JobWorker(QThread):
         iterations: int,
         output_dir: str,
         parent=None,
+        *,
+        sftp: dict | None = None,
     ) -> None:
         super().__init__(parent)
         self.mode = mode
@@ -116,6 +118,11 @@ class JobWorker(QThread):
         self.passphrase = passphrase
         self.iterations = iterations
         self.output_dir = output_dir
+        # Optional SFTP destination for output_dir ("sftp://…"): carries the
+        # session credentials {user, password, key_file} (+ client_factory for
+        # tests). The local file is ALWAYS written first and never deleted —
+        # upload is a verified mirror copy (see app/sftp.py).
+        self.sftp = sftp or None
         self._cancel = False
 
     def cancel(self) -> None:
@@ -128,8 +135,44 @@ class JobWorker(QThread):
         if mode == "decrypt" and stem.endswith("_encrypted"):
             stem = stem[: -len("_encrypted")]
         suffix = "_encrypted" if mode == "encrypt" else "_decrypted"
-        directory = out_dir if out_dir else os.path.dirname(input_path)
+        # An sftp:// output is a REMOTE location — it is never a local
+        # directory to join paths against. The local mirror copy therefore
+        # lands next to the input (the "empty output" rule), and the upload
+        # sends it to the remote location afterwards.
+        from .sftp import is_sftp_output
+
+        if out_dir and not is_sftp_output(out_dir):
+            directory = out_dir
+        else:
+            directory = os.path.dirname(input_path)
         return os.path.join(directory, f"{stem}{suffix}.png")
+
+    def _upload_to_sftp(self, local_path: str) -> str:
+        """Mirror `local_path` to the sftp:// output location.
+
+        Returns a display URL ("sftp://user@host/path/file") for status text.
+        The dialog-provided username overrides an empty URL user; otherwise an
+        explicit user in the URL wins. Raises app.sftp.SftpError (or a lower
+        level error) with a credential-free message.
+        """
+        from .sftp import SftpTarget, SftpUploader, parse_sftp_url
+
+        target = parse_sftp_url(self.output_dir)
+        user = (self.sftp or {}).get("user") or target.user
+        if user != target.user:
+            target = SftpTarget(
+                host=target.host, port=target.port, user=user, path=target.path
+            )
+        uploader = SftpUploader(
+            target,
+            password=(self.sftp or {}).get("password"),
+            key_file=(self.sftp or {}).get("key_file"),
+            client_factory=(self.sftp or {}).get("client_factory"),
+        )
+        remote = uploader.upload(local_path)
+        user_part = f"{target.user}@" if target.user else ""
+        port_part = f":{target.port}" if target.port != 22 else ""
+        return f"sftp://{user_part}{target.host}{port_part}{remote}"
 
     def run(self) -> None:  # executes in the worker thread
         ok = 0
@@ -148,9 +191,31 @@ class JobWorker(QThread):
                 else:
                     out_pixels = decrypt_image(pixels, self.passphrase)
                 out_path = self._default_output(path, self.mode, self.output_dir)
-                save_image(out_pixels, out_path)
-                ok += 1
-                self.file_done.emit(path, f"ok: {out_path}")
+                # save_image picks a non-clobbering name atomically and returns
+                # the path it really wrote — report that one, never a guess.
+                written = save_image(out_pixels, out_path)
+                if self.sftp:
+                    # Mirror-upload after the local write succeeded. Failure is
+                    # an error status (the file itself is safe locally) — we
+                    # never claim a finished upload that did not verify.
+                    try:
+                        remote = self._upload_to_sftp(written)
+                    except Exception as exc:  # noqa: BLE001
+                        failed += 1
+                        traceback.print_exc()
+                        self.file_done.emit(
+                            path,
+                            f"error: saved locally to {written}, but SFTP "
+                            f"upload failed: {exc}",
+                        )
+                        continue
+                    ok += 1
+                    self.file_done.emit(
+                        path, f"ok: {written} \u2192 uploaded {remote}"
+                    )
+                else:
+                    ok += 1
+                    self.file_done.emit(path, f"ok: {written}")
             except DecryptionError as exc:
                 failed += 1
                 self.file_done.emit(path, f"error: {exc}")

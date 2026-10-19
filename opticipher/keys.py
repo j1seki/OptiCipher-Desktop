@@ -67,6 +67,15 @@ DERIVED_KEY_LENGTH: int = 64
 _HASH_NAME: str = "sha256"
 
 
+#: Highest PBKDF2 iteration count the decryptor will run on an UNTRUSTED
+#: header field before authentication (see core.decrypt_image). The GUI/CLI
+#: cap legitimate files at 2_000_000; this ceiling is 5x that to leave room
+#: for future formats while still bounding the pre-authentication work an
+#: attacker can force (a crafted uint32-max value would otherwise burn hours
+#: of CPU in PBKDF2 before the HMAC check even runs).
+MAX_UNVERIFIED_ITERATIONS: int = 10_000_000
+
+
 @dataclass(frozen=True)
 class DerivedKeys:
     """

@@ -103,6 +103,12 @@ def encrypt_image(
         raise ValueError("pixels must be a uint8 array")
     if pixels.ndim != 3 or pixels.shape[2] not in (3, 4):
         raise ValueError("pixels must have shape (H, W, 3) or (H, W, 4)")
+    # The header stores iterations as uint32; reject anything struct.pack
+    # would fail on late (struct.error) or that no decryptor would accept.
+    if not (0 < iterations <= 0xFFFFFFFF):
+        raise ValueError(
+            f"iterations must be in 1..{0xFFFFFFFF}, got {iterations}"
+        )
 
     h, w, channels = pixels.shape
 
@@ -186,6 +192,35 @@ def decrypt_image(pixels: np.ndarray, passphrase: str) -> np.ndarray:
     candidate = stego.peek_header_bytes(pixels, header.HEADER_SIZE)
     hdr = header.parse(candidate)  # raises ValueError on bad magic/size
 
+    # 1b. Cheap plausibility bounds on UNTRUSTED header fields BEFORE any
+    #     expensive or structural work. None of these values are authenticated
+    #     yet, so an attacker must not be able to force large CPU/memory cost
+    #     ahead of the HMAC check (the iterations field alone could otherwise
+    #     stall a victim for hours in PBKDF2). Genuine v1 files sit far below
+    #     every bound; a file failing here is corrupt or crafted, and the
+    #     generic error keeps the wrong-passphrase/tamper distinction hidden.
+    if hdr.iterations <= 0 or hdr.iterations > keys.MAX_UNVERIFIED_ITERATIONS:
+        raise DecryptionError(
+            "integrity check failed: wrong passphrase or the file was modified."
+        )
+    if hdr.channels not in (3, 4) or hdr.width <= 0 or hdr.height <= 0:
+        raise DecryptionError(
+            "integrity check failed: wrong passphrase or the file was modified."
+        )
+    h_img, w_img = pixels.shape[0], pixels.shape[1]
+    if hdr.strip_rows <= 0 or hdr.strip_rows >= h_img:
+        raise DecryptionError(
+            "integrity check failed: wrong passphrase or the file was modified."
+        )
+    # A valid strip holds at least a full header plus one row's worth of room
+    # rounding; reject strip sizes that could not have been produced by the
+    # format (rows_needed is ceil(HEADER_SIZE / (width * channels))).
+    max_strip = stego.rows_needed(header.HEADER_SIZE, w_img, hdr.channels) + 1
+    if hdr.strip_rows > max_strip:
+        raise DecryptionError(
+            "integrity check failed: wrong passphrase or the file was modified."
+        )
+
     # 2. Re-derive keys from passphrase + embedded salt/iterations.
     derived = keys.derive_keys(passphrase, hdr.salt, hdr.iterations)
 
@@ -203,6 +238,18 @@ def decrypt_image(pixels: np.ndarray, passphrase: str) -> np.ndarray:
     if not _hmac.compare_digest(expected, hdr.hmac):
         raise DecryptionError(
             "integrity check failed: wrong passphrase or the file was modified."
+        )
+
+    # 4b. Every header field is now authenticated, the format version included.
+    #     Only against a verified HMAC is a version decision safe (a tampered
+    #     version byte fails step 4 first; a genuine future-version file with a
+    #     valid tag gets an explicit, actionable error instead of a confusing
+    #     "wrong passphrase" one).
+    if hdr.version != header.VERSION:
+        raise ValueError(
+            f"unsupported OptiCipher format version {hdr.version} — "
+            f"this build reads version {header.VERSION}. "
+            "Update OptiCipher to open this file."
         )
 
     # 5. Undo diffusion, then undo scrambling -> exact original.

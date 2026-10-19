@@ -19,20 +19,51 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QPainter, QPen
 from PySide6.QtWidgets import QSizePolicy, QWidget
 
+#: Per-channel bar colours for the Analyze histogram (image-editor
+#: convention). Keyed by the histogram dict keys built in app.workers.
+CHANNEL_COLORS = {
+    "channel_0": QColor(244, 95, 95),  # red
+    "channel_1": QColor(96, 214, 120),  # green
+    "channel_2": QColor(90, 170, 255),  # blue (the historic default)
+    "channel_3": QColor(240, 196, 84),  # alpha, amber
+}
+
+#: Friendly combo labels for the same keys.
+CHANNEL_LABELS = {
+    "channel_0": "Red (channel 0)",
+    "channel_1": "Green (channel 1)",
+    "channel_2": "Blue (channel 2)",
+    "channel_3": "Alpha (channel 3)",
+}
+
 
 class HistogramBars(QWidget):
     """A 256-bin histogram; bars scaled to the max bin (sqrt scale keeps
-    small bins visible next to dominant ones without lying about shape)."""
+    small bins visible next to dominant ones without lying about shape).
+
+    The bar colour follows the displayed channel (image-editor convention:
+    red/green/blue per RGB channel) so a glance says *which* channel is
+    shown without reading the combo box.
+    """
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self._counts: Sequence[int] = []
+        self._color = QColor(90, 170, 255)
         self.setMinimumHeight(120)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
 
-    def set_counts(self, counts: Sequence[int]) -> None:
+    def set_counts(
+        self, counts: Sequence[int], key: Optional[str] = None
+    ) -> None:
+        """Show `counts`; `key` (e.g. 'channel_1') picks the bar colour."""
         self._counts = list(counts)
+        self._color = CHANNEL_COLORS.get(key or "", QColor(90, 170, 255))
         self.update()
+
+    @property
+    def bar_color(self) -> QColor:
+        return QColor(self._color)
 
     def paintEvent(self, event) -> None:  # noqa: N802 (Qt naming)
         painter = QPainter(self)
@@ -47,7 +78,7 @@ class HistogramBars(QWidget):
         peak = math.sqrt(max(self._counts))
         bar_w = rect.width() / 256.0
         painter.setPen(Qt.NoPen)
-        painter.setBrush(QColor(90, 170, 255))
+        painter.setBrush(self._color)
         for i, value in enumerate(self._counts[:256]):
             if value == 0:
                 continue

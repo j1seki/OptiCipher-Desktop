@@ -65,7 +65,8 @@ from opticipher import __version__ as _lib_version
 from opticipher import accel, load_image
 
 from . import device as _device
-from .charts import HistogramBars, ValueBar
+from .charts import CHANNEL_LABELS, HistogramBars, ValueBar
+from .sftp import is_sftp_output, parse_sftp_url
 from .settings import AppSettings
 from .workers import AnalyzeWorker, JobWorker, detect_opticipher_header
 
@@ -190,9 +191,18 @@ class FileList(QWidget):
         self.listw = QListWidget()
         self.listw.setSelectionMode(QListWidget.ExtendedSelection)
         self.listw.currentItemChanged.connect(self._on_current_changed)
+        self.listw.setToolTip(
+            "Images to process in one batch — add with the buttons below or "
+            "drag & drop anywhere in the window. Clicking an item previews it."
+        )
         add_btn = QPushButton("Add files…")
         folder_btn = QPushButton("Add folder…")
         clear_btn = QPushButton("Clear")
+        add_btn.setToolTip("Pick one or more image files for the batch")
+        folder_btn.setToolTip("Add every image inside a folder")
+        clear_btn.setToolTip(
+            "Remove every file from the list (does not delete anything on disk)"
+        )
         add_btn.clicked.connect(self._add_dialog)
         folder_btn.clicked.connect(self._add_folder)
         clear_btn.clicked.connect(self.listw.clear)
@@ -378,6 +388,85 @@ class SettingsDialog(QDialog):
 
 
 # ---------------------------------------------------------------------------
+# SFTP credentials — session-memory only, never persisted.
+# ---------------------------------------------------------------------------
+class SftpCredentialsDialog(QDialog):
+    """
+    Ask for the credentials of an ``sftp://`` output location.
+
+    The values exist only in this dialog and the caller's memory: they are
+    never written to QSettings, never logged, and never allowed inside the
+    URL itself (parse_sftp_url refuses embedded passwords).
+    """
+
+    def __init__(self, target, parent=None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle(f"SFTP login — {target.host}")
+        form = QFormLayout(self)
+        dest = QLabel(target.describe())
+        dest.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        form.addRow("Destination", dest)
+
+        self.user_edit = QLineEdit(target.user)
+        self.user_edit.setPlaceholderText("SSH user (empty = current user)")
+        self.user_edit.setToolTip(
+            "Account on the SFTP server; leave empty to use your login name"
+        )
+        form.addRow("User", self.user_edit)
+
+        self.password_edit = QLineEdit()
+        self.password_edit.setEchoMode(QLineEdit.Password)
+        self.password_edit.setPlaceholderText("Password (session only)")
+        self.password_edit.setToolTip(
+            "Held in memory for this run of OptiCipher only — never saved to "
+            "settings, disk or logs"
+        )
+        form.addRow("Password", self.password_edit)
+
+        self.key_edit = QLineEdit()
+        self.key_edit.setPlaceholderText(
+            "Optional: path to a private key (used instead of a password)"
+        )
+        key_browse = QPushButton("…")
+        key_browse.setFixedWidth(32)
+        key_browse.setToolTip("Browse for an SSH private key file")
+        key_browse.clicked.connect(self._pick_key)
+        key_row = QHBoxLayout()
+        key_row.addWidget(self.key_edit, 1)
+        key_row.addWidget(key_browse)
+        form.addRow("Key file", key_row)
+
+        note = QLabel(
+            "Kept in memory for this session only — never written to disk."
+        )
+        note.setStyleSheet("color:#888;")
+        note.setWordWrap(True)
+        form.addRow("", note)
+
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.Ok | QDialogButtonBox.Cancel
+        )
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        form.addRow(buttons)
+
+    def _pick_key(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(
+            self, "SSH private key", os.path.expanduser("~")
+        )
+        if path:
+            self.key_edit.setText(path)
+
+    def credentials(self) -> dict:
+        """The entered credentials (empty fields become None)."""
+        return {
+            "user": self.user_edit.text().strip(),
+            "password": self.password_edit.text() or None,
+            "key_file": self.key_edit.text().strip() or None,
+        }
+
+
+# ---------------------------------------------------------------------------
 # Main window.
 # ---------------------------------------------------------------------------
 class MainWindow(QMainWindow):
@@ -393,6 +482,9 @@ class MainWindow(QMainWindow):
         self._job: Optional[JobWorker] = None
         self._analyze: Optional[AnalyzeWorker] = None
         self._last_output_path: Optional[str] = None
+        # SFTP credentials for THIS RUN ONLY (never QSettings — see
+        # SftpCredentialsDialog). Keyed by (host, port, user).
+        self._sftp_sessions: dict = {}
 
         self._build_ui()
         self._refresh_device_bar()
@@ -448,6 +540,10 @@ class MainWindow(QMainWindow):
         layout.addWidget(splitter, 1)
         self.device_label = QLabel()
         self.device_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        self.device_label.setToolTip(
+            "Acceleration backend in use (GPU via WebGPU, or CPU fallback) "
+            "and its thread settings — change it in Settings"
+        )
         layout.addWidget(self.device_label)
         self.setCentralWidget(central)
 
@@ -505,12 +601,24 @@ class MainWindow(QMainWindow):
         pass_edit = QLineEdit()
         pass_edit.setEchoMode(QLineEdit.Password)
         pass_edit.setPlaceholderText("Passphrase")
-        pass_row.addWidget(QLabel("Passphrase"))
+        pass_tip = (
+            "The passphrase derives the encryption key (PBKDF2 + ChaCha20). "
+            "There is NO recovery: without it the data cannot be decrypted — "
+            "there is no key escrow and no back door."
+        )
+        pass_edit.setToolTip(pass_tip)
+        pass_label = QLabel("Passphrase")
+        pass_label.setToolTip(pass_tip)
+        pass_row.addWidget(pass_label)
         pass_row.addWidget(pass_edit, 1)
         if mode == "encrypt":
             confirm_edit = QLineEdit()
             confirm_edit.setEchoMode(QLineEdit.Password)
             confirm_edit.setPlaceholderText("Repeat passphrase")
+            confirm_edit.setToolTip(
+                "Type the same passphrase again — a typo here would make the "
+                "encrypted file unrecoverable, so it must match exactly."
+            )
             pass_row.addWidget(confirm_edit)
             setattr(self, f"_{mode}_confirm", confirm_edit)
         setattr(self, f"_{mode}_pass", pass_edit)
@@ -563,11 +671,25 @@ class MainWindow(QMainWindow):
 
         out_row = QHBoxLayout()
         out_edit = QLineEdit(self.settings.output_dir)
-        out_edit.setPlaceholderText("Output folder (empty = next to input)")
+        out_edit.setPlaceholderText(
+            "Output folder or sftp://user@host/path (empty = next to input)"
+        )
+        out_tip = (
+            "Where results are written. Empty = next to the input file. "
+            "Existing files are never overwritten — a numbered name "
+            "(*_2.png) is used instead.\n"
+            "SFTP: type sftp://user@server/remote/dir and every result is "
+            "also uploaded there as a verified copy (the local file is kept). "
+            "Passwords are asked once per session and never saved."
+        )
+        out_edit.setToolTip(out_tip)
         browse = QPushButton("…")
         browse.setFixedWidth(32)
+        browse.setToolTip("Browse for an output folder")
         browse.clicked.connect(lambda: self._pick_out_dir(out_edit))
-        out_row.addWidget(QLabel("Output"))
+        out_label = QLabel("Output")
+        out_label.setToolTip(out_tip)
+        out_row.addWidget(out_label)
         out_row.addWidget(out_edit, 1)
         out_row.addWidget(browse)
         setattr(self, f"_{mode}_out", out_edit)
@@ -579,10 +701,18 @@ class MainWindow(QMainWindow):
         cancel_btn = QPushButton("Cancel")
         cancel_btn.setObjectName(f"{mode}_cancel")
         cancel_btn.setEnabled(False)
+        start_btn.setToolTip(
+            "Process every file in the list with the passphrase above"
+        )
+        cancel_btn.setToolTip(
+            "Stops after the current file finishes — files already written "
+            "remain valid and complete"
+        )
         start_btn.clicked.connect(lambda: self._start_job(mode))
         cancel_btn.clicked.connect(lambda: self._cancel_job(mode))
         progress = QProgressBar()
         progress.setObjectName(f"{mode}_progress")
+        progress.setToolTip("Files processed in this batch")
         actions.addWidget(start_btn)
         actions.addWidget(cancel_btn)
         actions.addWidget(progress, 1)
@@ -602,10 +732,15 @@ class MainWindow(QMainWindow):
         )
         hint.setWordWrap(True)
         hint.setStyleSheet("color:#888;")
+        hint.setToolTip(hint.text())
         layout.addWidget(hint)
 
         run_btn = QPushButton("Run analysis")
         run_btn.setObjectName("analyze_run")
+        run_btn.setToolTip(
+            "Compute entropy, adjacent-pixel correlation and histograms for "
+            "the selection (1 image) — plus NPCR/UACI for a ciphertext pair"
+        )
         run_btn.clicked.connect(self._start_analyze)
         layout.addWidget(run_btn)
 
@@ -624,21 +759,50 @@ class MainWindow(QMainWindow):
             bar = ValueBar(name, maximum=100.0 if "%" in name else 8.0, ideal=ideal)
             self.metric_bars[name] = bar
             self.results_layout.addWidget(bar)
+        self.metric_bars["Entropy (mean)"].setToolTip(
+            "Shannon entropy in bits/byte — ideal ciphertext sits at 8.0 "
+            "(uniform noise); the green band marks the target range"
+        )
+        self.metric_bars["NPCR %"].setToolTip(
+            "Number of Pixel Change Rate between two encryptions — ideal "
+            "~99.6%; measures how completely a one-pixel change spreads"
+        )
+        self.metric_bars["UACI %"].setToolTip(
+            "Unified Average Changing Intensity between two encryptions — "
+            "ideal ~33.5%"
+        )
         self.corr_table = QTableWidget(0, 3)
         self.corr_table.setHorizontalHeaderLabels(
             ["horizontal", "vertical", "diagonal"]
         )
         self.corr_table.verticalHeader().setVisible(True)
-        self.results_layout.addWidget(QLabel("Adjacent-pixel correlation"))
+        corr_label = QLabel("Adjacent-pixel correlation")
+        corr_label.setToolTip(
+            "Correlation between neighbouring pixels — ideal ciphertext is "
+            "near 0 in every direction (no structure left)"
+        )
+        self.results_layout.addWidget(corr_label)
         self.results_layout.addWidget(self.corr_table)
         hist_row = QHBoxLayout()
-        hist_row.addWidget(QLabel("Histogram channel"))
+        hist_label = QLabel("Histogram channel")
+        hist_label.setToolTip(
+            "Which colour channel the histogram below displays"
+        )
+        hist_row.addWidget(hist_label)
         self.hist_channel = QComboBox()
+        self.hist_channel.setToolTip(
+            "Pick a colour channel — bar colours follow it (red / green / "
+            "blue / amber)"
+        )
         self.hist_channel.currentIndexChanged.connect(self._update_hist)
         hist_row.addWidget(self.hist_channel)
         hist_row.addStretch(1)
         self.results_layout.addLayout(hist_row)
         self.hist_widget = HistogramBars()
+        self.hist_widget.setToolTip(
+            "Distribution of byte values (256 bins, sqrt height) — a flat "
+            "histogram indicates good diffusion"
+        )
         self.results_layout.addWidget(self.hist_widget)
         self._hist_data: dict = {}
         scroll = QScrollArea()
@@ -807,10 +971,26 @@ class MainWindow(QMainWindow):
         out_dir = getattr(self, f"_{mode}_out").text().strip()
         self.settings.output_dir = out_dir
 
+        # sftp:// destinations: validate the URL before anything starts, then
+        # collect credentials once per (host, port, user) for this session.
+        sftp_cfg = None
+        if is_sftp_output(out_dir):
+            try:
+                target = parse_sftp_url(out_dir)
+            except ValueError as exc:
+                QMessageBox.warning(self, "Invalid SFTP location", str(exc))
+                return
+            sftp_cfg = self._sftp_credentials(target)
+            if sftp_cfg is None:
+                return  # login cancelled — start no job
+
         self._set_preview("before", files[0])
         self.preview_after._label.setText("(pending)")  # type: ignore[attr-defined]
 
-        self._job = JobWorker(mode, files, passphrase, iterations, out_dir)
+        self._job = JobWorker(
+            mode, files, passphrase, iterations, out_dir, sftp=sftp_cfg
+        )
+        self._job_failures: list = []  # (path, reason) for the batch summary
         self._job.progress.connect(
             lambda pct, msg, m=mode: self._on_progress(m, pct, msg)
         )
@@ -835,16 +1015,44 @@ class MainWindow(QMainWindow):
             bar.setValue(pct)
         self.statusBar().showMessage(message)
 
+    def _sftp_credentials(self, target) -> Optional[dict]:
+        """Credentials for this target — cached in memory for the session."""
+        session_key = (target.host, target.port, target.user)
+        cached = self._sftp_sessions.get(session_key)
+        if cached:
+            return dict(cached)
+        dialog = SftpCredentialsDialog(target, self)
+        if dialog.exec() != QDialog.Accepted:
+            return None
+        creds = dialog.credentials()
+        # Cache under host/port + the user that will actually be used; a user
+        # typed here differs from the URL's, the next run re-asks (deliberate:
+        # never silently authenticate as a different account than the URL).
+        cache_key = (
+            target.host,
+            target.port,
+            creds["user"] or target.user,
+        )
+        self._sftp_sessions[cache_key] = dict(creds)
+        return dict(creds)
+
     def _on_file_done(self, path: str, status: str) -> None:
         if status.startswith("ok: "):
-            out_path = status[4:]
+            # Payload may be "<local> → uploaded sftp://…" — preview/status
+            # use the LOCAL file (it always exists; mirror upload never
+            # deletes it).
+            payload = status[4:]
+            out_path = payload.split(" → ")[0]
             self._last_output_path = out_path
             self._set_preview("after", out_path)
-            self.statusBar().showMessage(f"Saved {out_path}", 8000)
+            self.statusBar().showMessage(f"Saved {payload}", 8000)
         else:
             self.statusBar().showMessage(f"{os.path.basename(path)}: {status}", 10000)
             if "error" in status:
-                QMessageBox.warning(self, "Job error", f"{path}\n{status}")
+                # Collect instead of popping one modal per file: a batch of
+                # failures must not bury the user under dialogs. The full
+                # summary lands once, at all_done.
+                self._job_failures.append((path, status))
 
     def _on_all_done(self, mode: str, ok: int, bad: int) -> None:
         for suffix in ("start", "cancel"):
@@ -858,6 +1066,22 @@ class MainWindow(QMainWindow):
             f"Finished: {ok} succeeded, {bad} failed/cancelled", 8000
         )
         self._refresh_device_bar()
+
+        failures = getattr(self, "_job_failures", [])
+        if failures:
+            shown = "\n".join(
+                f"• {os.path.basename(p)} — {reason}"
+                for p, reason in failures[:10]
+            )
+            more = (
+                f"\n…and {len(failures) - 10} more" if len(failures) > 10 else ""
+            )
+            QMessageBox.warning(
+                self,
+                "Job finished with errors",
+                f"{ok} succeeded, {len(failures)} failed:\n\n{shown}{more}",
+            )
+            self._job_failures = []
 
     # -- analyze ------------------------------------------------------------
     def _start_analyze(self) -> None:
@@ -907,7 +1131,8 @@ class MainWindow(QMainWindow):
         self._hist_data = data["histograms"]
         self.hist_channel.blockSignals(True)
         self.hist_channel.clear()
-        self.hist_channel.addItems(list(self._hist_data.keys()))
+        for key in self._hist_data:
+            self.hist_channel.addItem(CHANNEL_LABELS.get(key, key), key)
         self.hist_channel.blockSignals(False)
         self._update_hist()
         self.statusBar().showMessage(
@@ -915,9 +1140,9 @@ class MainWindow(QMainWindow):
         )
 
     def _update_hist(self) -> None:
-        key = self.hist_channel.currentText()
+        key = self.hist_channel.currentData() or self.hist_channel.currentText()
         if key and key in self._hist_data:
-            self.hist_widget.set_counts(self._hist_data[key])
+            self.hist_widget.set_counts(self._hist_data[key], key=key)
 
     # -- about --------------------------------------------------------------
     def _about(self) -> None:
