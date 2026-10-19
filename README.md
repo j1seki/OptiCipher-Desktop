@@ -27,6 +27,26 @@ original image, pixel for pixel.
 A PySide6 desktop app over the same library, with pluggable hardware
 acceleration and per-OS installers.
 
+### Screenshots
+
+Real captures from the running app (regenerate with
+`python packaging/screenshots.py`).
+
+**Encrypt tab** — sample loaded, encryption finished, before/after preview,
+KDF cost, live device bar:
+
+![OptiCipher Desktop — Encrypt tab](docs/screenshots/main-window.png)
+
+**Analyze tab** — entropy, adjacent-pixel correlation, NPCR/UACI and the
+per-channel histogram for an original/ciphertext pair:
+
+![OptiCipher Desktop — Analyze tab](docs/screenshots/analyze.png)
+
+**Settings dialog** — compute device, threads, RAM budget, PBKDF2 cost, and
+what this machine offers:
+
+![OptiCipher Desktop — Settings dialog](docs/screenshots/settings.png)
+
 ### What the desktop app adds
 
 | Feature | Details |
@@ -60,10 +80,43 @@ OpenSSL golden vectors across block boundaries and sizes — any single-byte
 drift fails CI before it can touch a user's file. Measured numbers and their
 honest interpretation live in [docs/BENCHMARKS.md](docs/BENCHMARKS.md).
 
-### Install / run
+### Installation (desktop app)
+
+**Option A — download a release build (no Python required).**
+
+Grab the artifact for your OS from
+[Releases](https://github.com/j1seki/OptiCipher-Desktop/releases):
+
+| OS | Artifact | Notes |
+|---|---|---|
+| **Linux** | `OptiCipherDesktop-linux-x64.tar.gz` or `.AppImage` | tar.gz needs the distro's usual GL/glib runtime libraries (table below); the AppImage is self-contained (needs FUSE, or run `./…AppImage --appimage-extract`) |
+| **macOS** (Apple Silicon) | `…-macos-arm64.dmg` | unsigned build — right-click the app → **Open** on first launch to bypass Gatekeeper |
+| **Windows** | `…-windows-x64.zip` | unzip and run `OptiCipherDesktop.exe` |
+
+Linux: builds are produced on **Ubuntu 22.04 (glibc 2.35)**, so they start on
+every current distribution — Arch/CachyOS, Debian 12+, Ubuntu 22.04+, Fedora,
+and derivatives. The GUI needs the standard desktop runtime libraries:
+
+| Distro | Install command |
+|---|---|
+| Debian / Ubuntu / Linux Mint | `sudo apt install libegl1 libgl1 libglib2.0-0 libxkbcommon0 libdbus-1-3 libfontconfig1` |
+| Arch / CachyOS / Manjaro | `sudo pacman -S mesa libglvnd glib2 libxkbcommon dbus fontconfig` |
+| Fedora | `sudo dnf install mesa-libEGL mesa-libGL glib2 libxkbcommon dbus-libs fontconfig` |
 
 ```bash
-git clone <this-repo> && cd OptiCipher
+tar -xzf OptiCipherDesktop-linux-x64.tar.gz
+./OptiCipherDesktop/OptiCipherDesktop
+```
+
+This is tested, not assumed: every CI push runs the packaged binary
+headlessly in **Ubuntu 22.04 & 24.04, Debian 12 & 13, Arch and Fedora**
+containers before the artifact is uploaded.
+
+**Option B — install from source (Python 3.9+).**
+
+```bash
+git clone https://github.com/j1seki/OptiCipher-Desktop.git
+cd OptiCipher-Desktop
 python -m venv .venv && source .venv/bin/activate
 pip install -e ".[app]"      # library + PySide6 + wgpu
 python -m app.main           # launch the desktop app
@@ -71,18 +124,64 @@ python -m app.main           # launch the desktop app
 
 Extras: `.[dev]` (tests), `.[gpu]` (wgpu only, no GUI), `.[app]` (GUI + wgpu).
 
-### Packaged builds
+**Option C — library & CLI only.**
 
-CI (`.github/workflows/build.yml`) builds installable artifacts on every push:
-**Linux** `tar.gz` + best-effort AppImage · **macOS** arm64 `.app` + DMG ·
-**Windows** portable zip — each smoke-tested headless before upload. To build
-locally:
+```bash
+pip install -e .
+```
+
+**Build the package yourself.**
 
 ```bash
 pip install pyinstaller
 pyinstaller packaging/opticipher-desktop.spec --noconfirm
 ./dist/OptiCipherDesktop/OptiCipherDesktop --smoke   # headless check
 ```
+
+### How to use the desktop app
+
+**Encrypt**
+
+1. Open the **Encrypt** tab and add files or whole folders (*Add files…* /
+   *Add folder…*, or drag-and-drop into the list).
+2. Type a passphrase and repeat it in the confirmation box.
+3. Optionally adjust the **KDF cost** slider — higher costs more to encrypt
+   and far more to attack; 200,000 iterations is the default.
+4. Optionally pick an **Output** folder; empty means "next to the input",
+   writing `<name>_encrypted.png`.
+5. Press **Start**. The progress bar and the *before → after* preview update
+   live; the status bar reports how many files succeeded.
+
+**Decrypt**
+
+1. Switch to **Decrypt** and add the encrypted PNGs.
+2. Enter the passphrase (one box — decryption is verified, not guessed).
+3. Press **Start** — the original is recovered next to the ciphertext as
+   `<name>_decrypted.png`. A wrong passphrase or a tampered file is detected
+   via HMAC and reported per file; you never get silent garbage.
+
+**Analyze**
+
+1. Go to the **Analyze** tab.
+2. Add **one** image for entropy, adjacent-pixel correlation and the 256-bin
+   histogram…
+3. …or add an image **and its OptiCipher ciphertext** (the app aligns the
+   reserved header strip automatically) to also get **NPCR** and **UACI**.
+4. Press **Run analysis** — results render as metric bars, a correlation
+   table and a selectable per-channel histogram; the status bar names the
+   compute backend that ran it.
+
+**Settings & the device bar**
+
+- *Settings → Compute device*: **Auto** (a one-time per-machine calibration
+  picks the faster of CPU/GPU), **GPU** (WebGPU — Metal on macOS, Vulkan on
+  Linux, DX12/Vulkan on Windows) or **CPU**; plus CPU thread count, RAM
+  budget and the default PBKDF2 cost.
+- The bottom **device bar** always shows what actually ran: adapter, API,
+  threads, RAM budget and the calibration result.
+
+All jobs run on background worker threads — the UI never blocks, and Cancel
+stops a batch at the next file boundary.
 
 ### Attribution & license
 
@@ -96,6 +195,9 @@ original algorithm, CLI and docs below are theirs.
 ## Table of contents
 
 - [OptiCipher Desktop (this fork)](#opticipher-desktop-this-fork)
+  - [Screenshots](#screenshots)
+  - [Installation (desktop app)](#installation-desktop-app)
+  - [How to use the desktop app](#how-to-use-the-desktop-app)
 - [What "optical encryption" means here](#what-optical-encryption-means-here)
 - [Is this idea new?](#is-this-idea-new)
 - [How it works (the algorithm)](#how-it-works-the-algorithm)
@@ -461,7 +563,7 @@ pip install -e ".[app,dev]"  # pytest + GUI/GPU test deps
 pytest -v
 ```
 
-The suite (96 tests in this fork) covers each component in isolation, full
+The suite (100 tests in this fork) covers each component in isolation, full
 encrypt→decrypt round trips across many image shapes (including RGBA and
 degenerate 1×N images), Unicode passphrases, wrong-passphrase rejection, tamper
 detection, and the statistical behaviour on the real sample image — plus the
@@ -472,7 +574,8 @@ fork's parity layers:
 - `test_gpu_accel.py` — GPU golden-vector keystream parity vs OpenSSL and exact
   metric equality (auto-skips when no WebGPU adapter is present, e.g. CI).
 - `test_gui_smoke.py` — headless (offscreen) desktop-app wiring: window
-  construction, settings, worker round-trip, analysis report shape.
+  construction, per-tab file lists, settings, worker round-trip, analysis
+  report shape, and original+ciphertext pair alignment for NPCR/UACI.
 
 Every encrypted file in these tests is checked for bit-exact compatibility with
 the upstream algorithm in both directions — the format promise is a test, not

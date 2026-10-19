@@ -385,8 +385,9 @@ class MainWindow(QMainWindow):
         self.analyze_files = files
         layout.addWidget(files, 1)
         hint = QLabel(
-            "Select 1 image for entropy/correlation/histogram — or 2 images "
-            "with identical size for NPCR/UACI."
+            "Select 1 image for entropy/correlation/histogram — or pair an "
+            "image with its OptiCipher ciphertext (or two same-size images) "
+            "for NPCR/UACI."
         )
         hint.setWordWrap(True)
         hint.setStyleSheet("color:#888;")

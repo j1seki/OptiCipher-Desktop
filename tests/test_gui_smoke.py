@@ -24,7 +24,7 @@ import numpy as np
 import pytest
 from PySide6.QtWidgets import QApplication
 
-from opticipher import load_image, save_image
+from opticipher import encrypt_image, load_image, save_image
 
 from app.window import MainWindow, SettingsDialog
 from app.workers import AnalyzeWorker, JobWorker
@@ -137,3 +137,24 @@ def test_analyze_worker_report(qapp, sample_image):
     assert "horizontal" in data["correlation"]["channel_0"]
     assert len(data["histograms"]["channel_0"]) == 256
     assert data["npcr"] is None
+
+
+def test_analyze_worker_accepts_original_ciphertext_pair(qapp, sample_image, tmp_path):
+    """
+    The ciphertext carries the reserved strip, so it is taller than its
+    plaintext — yet (original, encrypted) is exactly the pair users select
+    for NPCR/UACI. Header-based alignment must crop the strip and compare
+    instead of rejecting the pair on dimensions.
+    """
+    src, img = sample_image
+    enc = encrypt_image(img.copy(), "pair-pass", iterations=10_000)
+    enc_path = str(tmp_path / "sample_encrypted.png")
+    save_image(enc, enc_path)
+    worker = AnalyzeWorker([src, enc_path])
+    results, failures = [], []
+    worker.result.connect(results.append)
+    worker.failed.connect(failures.append)
+    worker.run()
+    assert results and not failures
+    assert results[0]["npcr"] is not None
+    assert results[0]["uaci"] is not None

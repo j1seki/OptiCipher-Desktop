@@ -58,6 +58,34 @@ def detect_opticipher_header(pixels: np.ndarray) -> Optional[Dict[str, object]]:
     }
 
 
+def match_ciphertext_pair(
+    a: np.ndarray, b: np.ndarray
+) -> Optional[Tuple[np.ndarray, np.ndarray]]:
+    """
+    Align an (original, ciphertext) pair onto the common plaintext region.
+
+    An OptiCipher ciphertext is the original pixels plus the reserved header
+    strip appended at the bottom, so the natural pair a user selects in the
+    Analyze tab (a plain image and its encrypted file) never has identical
+    dimensions. When one image's header records the other image's exact size,
+    crop the strip rows off the ciphertext and return the aligned pair;
+    otherwise None (the caller keeps its strict same-shape rule).
+    """
+    for plain, cipher in ((a, b), (b, a)):
+        if cipher.ndim != plain.ndim or cipher.shape[1:] != plain.shape[1:]:
+            continue
+        if cipher.shape[0] <= plain.shape[0]:
+            continue
+        info = detect_opticipher_header(cipher)
+        if (
+            info
+            and int(info["height"]) == plain.shape[0]
+            and int(info["width"]) == plain.shape[1]
+        ):
+            return plain, cipher[: plain.shape[0]]
+    return None
+
+
 class JobWorker(QThread):
     """
     Sequential batch encrypt/decrypt worker.
@@ -197,14 +225,24 @@ class AnalyzeWorker(QThread):
             uaci_val: Optional[float] = None
             if len(self.files) >= 2:
                 second = load_image(self.files[1])
+                first_cmp = first
                 if second.shape != first.shape:
-                    raise ValueError("the two images must have identical dimensions")
+                    # Ciphertexts carry the reserved strip (taller than the
+                    # plaintext) — align the natural original+encrypted pair
+                    # before comparing.
+                    pair = match_ciphertext_pair(first, second)
+                    if pair is None:
+                        raise ValueError(
+                            "the two images must have identical dimensions "
+                            "(or be an original and its OptiCipher ciphertext)"
+                        )
+                    first_cmp, second = pair
                 if hasattr(backend, "npcr"):
-                    npcr_val = backend.npcr(first, second)
-                    uaci_val = backend.uaci(first, second)
+                    npcr_val = backend.npcr(first_cmp, second)
+                    uaci_val = backend.uaci(first_cmp, second)
                 else:
-                    npcr_val = ref_metrics.npcr(first, second)
-                    uaci_val = ref_metrics.uaci(first, second)
+                    npcr_val = ref_metrics.npcr(first_cmp, second)
+                    uaci_val = ref_metrics.uaci(first_cmp, second)
 
             self.result.emit(
                 {
