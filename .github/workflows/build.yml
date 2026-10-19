@@ -7,6 +7,7 @@ name: build
 on:
   push:
     branches: [main]
+    tags: ["v*"]
   pull_request:
   workflow_dispatch:
 
@@ -228,4 +229,43 @@ jobs:
             timeout 60 squashfs-root/AppRun --smoke
           else
             echo "No AppImage in the artifact (skipping)"
+          fi
+
+  # Publish a GitHub Release when a v* tag is pushed. Actions artifacts
+  # expire after 90 days and hide inside a run; Releases are the permanent,
+  # user-facing download page. Gated on the full build matrix AND all six
+  # distro smoke legs — nothing reaches the Releases page untested.
+  release:
+    name: release (${{ github.ref_name }})
+    needs: [build, smoke-linux-distros]
+    if: ${{ startsWith(github.ref, 'refs/tags/v') }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          shopt -s nullglob
+          assets=(
+            OptiCipherDesktop-*.tar.gz   # Linux tarball (guaranteed)
+            OptiCipherDesktop-*.AppImage  # Linux AppImage (best-effort)
+            OptiCipherDesktop-*.dmg       # macOS DMG
+            OptiCipherDesktop-*.zip       # macOS app zip + Windows zip
+          )
+          ls -la "${assets[@]}"
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            # Re-run of the tag: refresh assets instead of failing.
+            gh release upload "$GITHUB_REF_NAME" --clobber "${assets[@]}"
+          else
+            gh release create "$GITHUB_REF_NAME" \
+              --title "OptiCipher Desktop $GITHUB_REF_NAME" \
+              --generate-notes \
+              "${assets[@]}"
           fi

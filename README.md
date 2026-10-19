@@ -112,6 +112,12 @@ This is tested, not assumed: every CI push runs the packaged binary
 headlessly in **Ubuntu 22.04 & 24.04, Debian 12 & 13, Arch and Fedora**
 containers before the artifact is uploaded.
 
+**Where releases come from:** pushing a version tag (`git tag v1.0.0 && git
+push origin v1.0.0`) runs the full build + distro-test matrix and then
+publishes everything as a [GitHub Release](https://github.com/j1seki/OptiCipher-Desktop/releases)
+automatically. (The per-run *Actions artifacts* expire after 90 days — always
+download from the Releases page.)
+
 **Option B — install from source (Python 3.9+).**
 
 ```bash
