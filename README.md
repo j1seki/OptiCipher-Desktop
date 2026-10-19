@@ -27,6 +27,33 @@ original image, pixel for pixel.
 A PySide6 desktop app over the same library, with pluggable hardware
 acceleration and per-OS installers.
 
+### What's new in v1.3.0 — the interface rebuild
+
+The desktop app was redesigned from the ground up around a token-driven
+design system. No backend behaviour changed: the file format, the CLI, the
+atomic writes and the SFTP outputs are exactly as they were.
+
+- **A real application shell** — a navigation sidebar (with a wordmark,
+  icons and a live device summary) around eight screens, instead of three
+  bare tabs.
+- **Eight screens, all backed by real functionality** — Overview, Encrypt,
+  Decrypt, Verify integrity, Analyze, History, Settings, About. No
+  placeholder pages.
+- **A proper design system** — every colour, radius and spacing value is a
+  token in one place; a **dark theme (default) and a light theme**, both
+  remembered between runs, restyle the whole application at once. No widget
+  carries an inline stylesheet.
+- **Honest state** — decryption reports *authentication*, *output written*
+  and *exact restoration* as three separate rows, so a partially failed run
+  can never read as a green "done".
+- **A new integrity-verification screen** — check a ciphertext's HMAC-SHA256
+  tag without restoring it, with the six verdicts the backend can actually
+  produce and the technical details behind them.
+- **Accessibility** — `Alt+1`…`Alt+8` navigation, accessible names, a
+  tooltip on every control, readable secondary text, and a 960×620 minimum
+  window size.
+- **239 tests** (up from 208), green on Linux, macOS and Windows.
+
 ### Screenshots
 
 Real captures from the running app (regenerate with

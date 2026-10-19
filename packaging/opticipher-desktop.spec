@@ -92,6 +92,14 @@ coll = COLLECT(
 )
 
 if sys.platform == "darwin":
+    # Read the version from the package so the bundle metadata can never go
+    # stale (it said 1.0.0 for a long time).
+    import re
+
+    with open(os.path.join(ROOT, "app", "__init__.py"), encoding="utf-8") as _fh:
+        _match = re.search(r'^__version__\s*=\s*"([^"]+)"', _fh.read(), re.M)
+    APP_VERSION = _match.group(1) if _match else "0.0.0"
+
     app = BUNDLE(
         coll,
         name="OptiCipher Desktop.app",
@@ -99,6 +107,7 @@ if sys.platform == "darwin":
         bundle_identifier="org.biocolab.opticipher.desktop",
         info_plist={
             "NSHighResolutionCapable": True,
-            "CFBundleShortVersionString": "1.0.0",
+            "CFBundleShortVersionString": APP_VERSION,
+            "CFBundleVersion": APP_VERSION,
         },
     )
