@@ -18,6 +18,12 @@ Thumbs.db
 .idea/
 .vscode/
 
+# Android / web build outputs
+android/.gradle/
+android/app/build/
+android/local.properties
+web/node_modules/
+
 # Generated example outputs (keep the committed sample_* in samples/)
 examples/out_*.png
 examples/benchmark_results.json

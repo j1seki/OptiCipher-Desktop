@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent" android:layout_height="match_parent"
+    android:padding="16dp">
+    <LinearLayout android:orientation="vertical" android:layout_width="match_parent" android:layout_height="wrap_content">
+        <TextView android:text="OptiCipher — 100% on-device" android:textSize="20sp" android:layout_width="wrap_content" android:layout_height="wrap_content"/>
+        <TextView android:text="Files never leave this device. Encrypted PNGs are bit-compatible with the desktop app." android:layout_width="wrap_content" android:layout_height="wrap_content"/>
+        <RadioGroup android:id="@+id/modeGroup" android:orientation="horizontal" android:layout_width="wrap_content" android:layout_height="wrap_content">
+            <RadioButton android:id="@+id/modeEncrypt" android:text="Encrypt" android:checked="true" android:layout_width="wrap_content" android:layout_height="wrap_content"/>
+            <RadioButton android:id="@+id/modeDecrypt" android:text="Decrypt" android:layout_width="wrap_content" android:layout_height="wrap_content"/>
+            <RadioButton android:id="@+id/modeVerify" android:text="Verify" android:layout_width="wrap_content" android:layout_height="wrap_content"/>
+        </RadioGroup>
+        <EditText android:id="@+id/pass" android:hint="Passphrase" android:inputType="textPassword" android:layout_width="match_parent" android:layout_height="wrap_content"/>
+        <TextView android:id="@+id/iterLabel" android:layout_width="wrap_content" android:layout_height="wrap_content"/>
+        <SeekBar android:id="@+id/iter" android:max="2000000" android:progress="200000" android:layout_width="match_parent" android:layout_height="wrap_content"/>
+        <Button android:id="@+id/pickBtn" android:text="Pick images…" android:layout_width="match_parent" android:layout_height="wrap_content"/>
+        <Button android:id="@+id/outputBtn" android:text="Set output folder…" android:layout_width="match_parent" android:layout_height="wrap_content"/>
+        <ImageView android:id="@+id/preview" android:visibility="gone" android:layout_width="match_parent" android:layout_height="240dp" android:scaleType="fitCenter"/>
+        <LinearLayout android:id="@+id/results" android:orientation="vertical" android:layout_width="match_parent" android:layout_height="wrap_content"/>
+        <TextView android:text="Folder watch (auto encrypt/decrypt)" android:textSize="18sp" android:layout_width="wrap_content" android:layout_height="wrap_content"/>
+        <TextView android:id="@+id/watchStatus" android:layout_width="wrap_content" android:layout_height="wrap_content"/>
+        <Button android:id="@+id/watchBtn" android:text="Pick watched folder…" android:layout_width="match_parent" android:layout_height="wrap_content"/>
+        <Button android:id="@+id/watchOffBtn" android:text="Stop watching" android:layout_width="match_parent" android:layout_height="wrap_content"/>
+        <CheckBox android:id="@+id/rememberChk" android:text="Remember passphrase (encrypted, enables background processing)" android:layout_width="wrap_content" android:layout_height="wrap_content"/>
+        <CheckBox android:id="@+id/moveChk" android:text="Move originals after processing (off = copy)" android:layout_width="wrap_content" android:layout_height="wrap_content"/>
+        <Button android:id="@+id/permBtn" android:text="Permissions &amp; battery settings" android:layout_width="match_parent" android:layout_height="wrap_content"/>
+    </LinearLayout>
+</ScrollView>

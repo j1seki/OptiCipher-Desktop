@@ -1,0 +1,11 @@
+{
+  "name": "opticipher-web",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs",
+    "test": "node --test tests/parity.test.js"
+  },
+  "dependencies": { "pako": "^2.1.0" },
+  "devDependencies": { "esbuild": "^0.24.0" }
+}

@@ -1,0 +1,51 @@
+name: android
+
+# Build the Android APK (android/) and upload it as a workflow artifact.
+# On v* tags, also attach it to the GitHub Release (alongside the desktop
+# installers built by build.yml). Unsigned debug APK for sideloading/testing;
+# sign with your own keystore for store distribution.
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - name: Unit tests (crypto parity vs desktop golden vector)
+        working-directory: android
+        run: ./gradlew testDebugUnitTest --no-daemon
+      - name: Build debug APK
+        working-directory: android
+        run: ./gradlew assembleDebug --no-daemon
+      - name: Rename APK for release
+        run: cp android/app/build/outputs/apk/debug/app-debug.apk OptiCipher-android.apk && ls -lh OptiCipher-android.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: OptiCipher-android-debug-apk
+          path: OptiCipher-android.apk
+      - name: Attach APK to GitHub Release (tags only)
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          # Same idempotent pattern as build.yml: refresh if the release
+          # already exists (created by the desktop matrix), else create it.
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" --clobber OptiCipher-android.apk
+          else
+            gh release create "$GITHUB_REF_NAME" \
+              --title "OptiCipher Desktop $GITHUB_REF_NAME" \
+              --generate-notes \
+              OptiCipher-android.apk
+          fi

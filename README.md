@@ -27,6 +27,26 @@ original image, pixel for pixel.
 A PySide6 desktop app over the same library, with pluggable hardware
 acceleration and per-OS installers.
 
+### What's new in v1.4.0 — web & Android editions
+
+Two new editions of the same v1 format, both **100% client-side and
+bit-for-bit compatible** with the desktop app (a ciphertext from any edition
+decrypts in all of them):
+
+- **Web (`web/`)** — a browser app hosted on **GitHub Pages**: Encrypt,
+  Decrypt, Verify and Analyze, entirely in the browser tab. The Python core
+  is re-implemented in JS (WebCrypto PBKDF2/HMAC, pure-JS ChaCha20, and an
+  exact NumPy SeedSequence/PCG64 port for the pixel scramble) with a
+  lossless PNG codec — files are processed locally and never uploaded.
+- **Android (`android/`)** — a native Kotlin app distributed as an **APK**,
+  with **SAF-based folder watching** for auto encrypt/decrypt, WorkManager
+  background processing, and the correct scoped-storage permission flows.
+  Its crypto core is unit-tested against a ciphertext produced by this
+  desktop build.
+
+See [Web & Android editions](#web--android-editions) below and
+[`docs/WEB_ANDROID.md`](docs/WEB_ANDROID.md).
+
 ### What's new in v1.3.0 — the interface rebuild
 
 The desktop app was redesigned from the ground up around a token-driven
@@ -313,6 +333,109 @@ pyinstaller packaging/opticipher-desktop.spec --noconfirm
 All jobs run on background worker threads — the UI never blocks, and Cancel
 stops a batch at the next file boundary.
 
+## Web & Android editions
+
+The same v1 format, 100% client-side, in two more editions — full technical
+details in [`docs/WEB_ANDROID.md`](docs/WEB_ANDROID.md).
+
+### Web (`web/`) — GitHub Pages
+
+Yes, it hosts on GitHub Pages: the app is pure static HTML/CSS/JS with no
+server, and **nothing is uploaded** — files are read, encrypted and written
+entirely in the browser tab. The GitHub Pages site is built and deployed by
+[`.github/workflows/pages.yml`](.github/workflows/pages.yml) on every push
+to `main` (or run it manually from the Actions tab).
+
+| Screen | What it does |
+|---|---|
+| **Encrypt** | drag-and-drop / multi-select images, passphrase + confirmation, KDF cost slider, live preview, download `<name>_encrypted.png` |
+| **Decrypt** | same shape; wrong passphrase / tampering reported per file via the HMAC check |
+| **Verify** | read-only integrity check (with or without a passphrase), same verdicts as desktop |
+| **Analyze** | entropy, adjacent-pixel correlation, NPCR/UACI (add a second image), per-channel histogram |
+
+How parity is achieved (the Python core re-implemented in JS):
+
+| Python (`opticipher/`) | Web (`web/src/`) |
+|---|---|
+| `keys.py` PBKDF2-HMAC-SHA256 | WebCrypto `PBKDF2` |
+| `core.py` HMAC-SHA256 | WebCrypto `HMAC` |
+| `diffusion.py` ChaCha20 (`cryptography`) | `chacha20.js` — pure-JS ChaCha20, 16-byte nonce (4-byte LE counter + 12-byte nonce) |
+| `scramble.py` `numpy.default_rng(seed).permutation()` | `pcg64.js` — NumPy **SeedSequence + PCG64 XSL-RR** ported exactly (two-step `srandom` seeding + uint32 mask-rejection Fisher–Yates), verified against NumPy |
+| `io_image.py` Pillow PNG | `png.js` — lossless PNG codec (pako zlib). Deliberately **not** `<canvas>`, which premultiplies alpha and would corrupt RGBA ciphertexts |
+
+Run / build it yourself:
+
+```bash
+cd web
+npm install
+npm test        # parity: PCG64 vs NumPy, ChaCha20 RFC vector, round-trip, PNG codec
+npm run build   # -> web/dist (the deployable static site)
+```
+
+Non-PNG inputs (JPEG/WebP) fall back to canvas decoding; PNGs always take
+the exact path. Large photos are slower in pure JS (a WASM ChaCha20 is the
+natural next optimisation). Interlaced / 16-bit PNGs are not handled by the
+exact decoder and use the canvas fallback.
+
+### Android (`android/`) — APK
+
+A native Kotlin app (no WebView, so folder watching and background work are
+real Android features). Same crypto core, ported 1:1 and unit-tested against
+a desktop-produced golden ciphertext.
+
+```bash
+cd android
+./gradlew testDebugUnitTest   # parity vs the desktop golden vector
+./gradlew assembleDebug       # -> app/build/outputs/apk/debug/app-debug.apk
+```
+
+Releases: pushing a version tag also builds the APK in
+[`.github/workflows/android.yml`](.github/workflows/android.yml) and attaches
+it (`OptiCipher-android.apk`) to the GitHub Release alongside the desktop
+installers. The debug APK is unsigned-for-release — sideload it directly, or
+sign it with your own keystore for distribution.
+
+**What the app does:** Encrypt / Decrypt / Verify with file pickers, live
+preview, share/open intents from other apps, KDF cost control, and safe
+(non-overwriting) outputs to a chosen folder or app storage.
+
+**Folder watching — auto encrypt/decrypt.** Android's scoped storage (10+)
+has no general "watch any folder", so the app uses the supported path:
+
+1. Pick a watched **Inbox** folder via the system tree picker
+   (`ACTION_OPEN_DOCUMENT_TREE`); the app keeps a **persistable URI
+   permission** (survives reboot, no broad storage permission — `MANAGE_EXTERNAL_STORAGE`
+   is deliberately avoided: Play policy would reject it).
+2. A **`ContentObserver`** on that tree queues new/changed files, plus a
+   **WorkManager periodic poll (15 min)** as fallback for OEM file managers.
+3. Each new PNG is checked for an existing **`OPTC` header** (by content, not
+   filename) so already-encrypted files are never re-encrypted; the output
+   folder is excluded to prevent loops. Outputs go to the chosen output
+   folder — **never overwriting** (`_2`, `_3`…) — and originals are copied
+   by default (move is an opt-in toggle).
+4. A passphrase is required to process. Default is *in-memory only* (the
+   watcher queues files and notifies "open the app to process"); enabling
+   **"Remember passphrase"** stores it in `EncryptedSharedPreferences`
+   (AES-256) so background processing runs unattended. Nothing is ever sent
+   anywhere.
+
+**Permission flow** (asked lazily, in this order):
+
+| When | What | Why |
+|---|---|---|
+| Picking folders | none (system picker grants it) | SAF tree + persistable URI |
+| First media access | `READ_MEDIA_IMAGES` (13+) / `READ_EXTERNAL_STORAGE` (≤12) / partial `READ_MEDIA_VISUAL_USER_SELECTED` (14+) | camera-roll style sources |
+| Background work | `POST_NOTIFICATIONS` (13+), battery-optimisation exemption prompt | completion notice; WorkManager not throttled |
+| During a batch | `FOREGROUND_SERVICE_DATA_SYNC` (14+, declared in manifest) | long batches |
+
+**Known limitations:** semi-transparent RGBA via `BitmapFactory` is lossy
+(Android premultiplies alpha) — opaque photos and all PNG ciphertexts
+(exact codec) are unaffected, same caveat as the web canvas fallback. The
+Kotlin PCG64 uses `BigInteger` for 128-bit state (fine for photos).
+Same threat model as desktop: PBKDF2 is memory-cheap — read the
+[threat model](#threat-model--security-notes) before protecting anything
+sensitive.
+
 ### Attribution & license
 
 MIT, unchanged from upstream — © [bio-colab](https://github.com/bio-colab)
@@ -328,6 +451,9 @@ original algorithm, CLI and docs below are theirs.
   - [Screenshots](#screenshots)
   - [Installation (desktop app)](#installation-desktop-app)
   - [How to use the desktop app](#how-to-use-the-desktop-app)
+- [Web & Android editions](#web--android-editions)
+  - [Web (`web/`) — GitHub Pages](#web-web--github-pages)
+  - [Android (`android/`) — APK](#android-android--apk)
 - [What "optical encryption" means here](#what-optical-encryption-means-here)
 - [Is this idea new?](#is-this-idea-new)
 - [How it works (the algorithm)](#how-it-works-the-algorithm)
@@ -512,7 +638,21 @@ OptiCipher/
 │   ├── sftp.py              # sftp:// output locations (paramiko, session-only creds)
 │   └── charts.py            # histogram & metric bar widgets
 ├── packaging/               # (fork) PyInstaller spec, icons, entry
+├── web/                     # (fork) browser edition — GitHub Pages, 100% client-side
+│   ├── index.html, style.css, manifest.webmanifest
+│   ├── src/                 # pcg64.js, chacha20.js, core.js, png.js, app.js
+│   ├── tests/parity.test.js # Node parity tests vs desktop golden vector
+│   └── build.mjs            # esbuild bundle -> dist/ (Pages deploy target)
+├── android/                 # (fork) native Kotlin app -> APK
+│   └── app/src/main/java/com/opticipher/
+│       ├── Crypto.kt        # PCG64/ChaCha20/PBKDF2/HMAC core (parity-tested)
+│       ├── PngCodec.kt      # lossless PNG codec (java.util.zip)
+│       ├── MainActivity.kt  # encrypt/decrypt/verify UI + share intents
+│       └── FolderWatcher.kt # SAF folder watch + WorkManager background jobs
 ├── .github/workflows/       # (fork) 3-OS CI build + smoke tests
+│   ├── build.yml            # desktop matrix + GitHub Release on v* tags
+│   ├── pages.yml            # web -> GitHub Pages
+│   └── android.yml          # Android unit tests + APK (+ Release asset on tags)
 ├── tests/                   # pytest suite (run with `pytest`)
 │   ├── test_roundtrip.py
 │   ├── test_components.py
@@ -538,7 +678,8 @@ OptiCipher/
 │   ├── ALGORITHM.md
 │   ├── METRICS.md
 │   ├── FORMAT.md               # (fork) v1 format spec + guarantees matrix
-│   └── BENCHMARKS.md        # (fork) acceleration benchmark report
+│   ├── BENCHMARKS.md        # (fork) acceleration benchmark report
+│   └── WEB_ANDROID.md       # (fork) web + Android editions: parity, hosting, folder watch
 ├── pyproject.toml           # packaging / install metadata
 ├── requirements.txt
 ├── LICENSE                  # MIT

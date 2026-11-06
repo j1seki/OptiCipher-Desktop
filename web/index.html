@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>OptiCipher — client-side image encryption</title>
+<meta name="description" content="Open-source optical image encryption that runs 100% in your browser. Files never leave your device."/>
+<link rel="manifest" href="manifest.webmanifest"/>
+<link rel="stylesheet" href="style.css"/>
+</head>
+<body>
+<header>
+  <h1>OptiCipher <span class="muted">web</span></h1>
+  <p class="muted">Optical image encryption — 100% client-side. Nothing is uploaded; your passphrase never leaves this page.</p>
+</header>
+<nav class="tabs" role="tablist">
+  <button data-tab="encrypt" class="active">Encrypt</button>
+  <button data-tab="decrypt">Decrypt</button>
+  <button data-tab="verify">Verify</button>
+  <button data-tab="analyze">Analyze</button>
+</nav>
+
+<section id="tab-encrypt" class="panel">
+  <label class="drop" id="drop-encrypt">Drop images or <input type="file" id="files-encrypt" accept="image/*" multiple/> multiply-select</label>
+  <div class="row"><label>Passphrase <input type="password" id="pass-encrypt" autocomplete="off"/></label>
+  <label>Confirm <input type="password" id="pass2-encrypt" autocomplete="off"/></label></div>
+  <label>KDF cost (PBKDF2 iterations) <input type="range" id="iter-encrypt" min="10000" max="2000000" step="10000" value="200000"/> <output id="iter-out">200000</output></label>
+  <button id="run-encrypt">Encrypt</button>
+  <div id="out-encrypt" class="results"></div>
+</section>
+
+<section id="tab-decrypt" class="panel hidden">
+  <label class="drop" id="drop-decrypt">Drop encrypted PNGs or <input type="file" id="files-decrypt" accept="image/png" multiple/> multiply-select</label>
+  <label>Passphrase <input type="password" id="pass-decrypt" autocomplete="off"/></label>
+  <button id="run-decrypt">Decrypt</button>
+  <div id="out-decrypt" class="results"></div>
+</section>
+
+<section id="tab-verify" class="panel hidden">
+  <label class="drop" id="drop-verify">Drop an encrypted PNG or <input type="file" id="files-verify" accept="image/png"/></label>
+  <label>Passphrase (optional — without it, format only) <input type="password" id="pass-verify" autocomplete="off"/></label>
+  <button id="run-verify">Verify integrity</button>
+  <div id="out-verify" class="results"></div>
+</section>
+
+<section id="tab-analyze" class="panel hidden">
+  <label class="drop" id="drop-analyze">Drop image(s) — add a second for NPCR/UACI <input type="file" id="files-analyze" accept="image/*" multiple/></label>
+  <button id="run-analyze">Run analysis</button>
+  <div id="out-analyze" class="results"></div>
+  <canvas id="hist" width="640" height="220"></canvas>
+</section>
+
+<footer class="muted">
+  <p>Format v1 — bit-for-bit compatible with the desktop app. Encrypted files are lossless PNGs with everything needed (except your passphrase) embedded.
+  Research/education tool; PBKDF2 is memory-cheap — see the desktop README threat model before protecting anything sensitive.</p>
+</footer>
+<script type="module" src="assets/app.js"></script>
+</body>
+</html>
