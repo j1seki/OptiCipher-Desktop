@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Material 3, following the desktop dark design tokens -->
+    <style name="Theme.OptiCipher" parent="Theme.Material3.DayNight.NoActionBar">
+        <item name="colorPrimary">@color/brand_accent</item>
+        <item name="colorOnPrimary">@color/brand_on_accent</item>
+        <item name="colorPrimaryContainer">#1C3A31</item>
+        <item name="colorOnPrimaryContainer">#38D6A3</item>
+        <item name="colorSecondary">@color/brand_accent</item>
+        <item name="colorSurface">@color/brand_surface</item>
+        <item name="android:statusBarColor">?attr/colorSurface</item>
+        <item name="android:navigationBarColor">?attr/colorSurface</item>
+    </style>
+</resources>

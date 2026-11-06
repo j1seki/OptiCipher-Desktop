@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Brand tokens from the desktop design system (app/theme.py) -->
+    <color name="ic_launcher_background">#101318</color>
+    <color name="brand_accent">#38D6A3</color>
+    <color name="brand_accent_dark">#2BB88C</color>
+    <color name="brand_bg">#101318</color>
+    <color name="brand_surface">#1B202A</color>
+    <color name="brand_on_accent">#062018</color>
+</resources>

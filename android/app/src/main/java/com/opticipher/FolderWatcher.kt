@@ -38,6 +38,7 @@ object FolderWatcher {
     private const val REMEMBER = "remember"
     private const val MOVE = "move_original"
     private const val PROCESSED = "processed"
+    private const val WATCHING = "watching"
     const val WORK = "opticipher-folder-watch"
 
     private var observer: ContentObserver? = null
@@ -53,7 +54,7 @@ object FolderWatcher {
     fun isRemembering(ctx: Context) = prefs(ctx).getBoolean(REMEMBER, false)
     fun setMoveOriginal(ctx: Context, on: Boolean) = prefs(ctx).edit().putBoolean(MOVE, on).apply()
     fun isMoveOriginal(ctx: Context) = prefs(ctx).getBoolean(MOVE, false)
-    fun isWatching(ctx: Context) = prefs(ctx).contains(INBOX)
+    fun isWatching(ctx: Context) = prefs(ctx).getBoolean(WATCHING, false) && getInbox(ctx) != null
 
     private fun prefs(ctx: Context) = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
     private fun encPrefs(ctx: Context): android.content.SharedPreferences {
@@ -70,7 +71,8 @@ object FolderWatcher {
 
     fun startWatching(ctx: Context) {
         val inbox = getInbox(ctx) ?: return
-        stopWatching(ctx)
+        prefs(ctx).edit().putBoolean(WATCHING, true).apply()
+        stopWatching(ctx, keepFlag = true)
         val app = ctx.applicationContext
         observer = object : ContentObserver(Handler(Looper.getMainLooper())) {
             override fun onChange(selfChange: Boolean) { enqueue(app) }
@@ -83,10 +85,12 @@ object FolderWatcher {
         WorkManager.getInstance(app).enqueueUniquePeriodicWork(WORK, ExistingPeriodicWorkPolicy.KEEP, periodic)
     }
 
-    fun stopWatching(ctx: Context) {
+    fun stopWatching(ctx: Context, keepFlag: Boolean = false) {
+        if (!keepFlag) prefs(ctx).edit().putBoolean(WATCHING, false).apply()
         observer?.let { try { ctx.contentResolver.unregisterContentObserver(it) } catch (_: Exception) {} }
         observer = null
         WorkManager.getInstance(ctx).cancelUniqueWork(WORK)
+        WorkManager.getInstance(ctx).cancelUniqueWork(WORK + "-now")
     }
 
     fun enqueue(ctx: Context) {
