@@ -20,7 +20,15 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
-      - uses: android-actions/setup-android@v3
+      # ubuntu-latest ships the Android SDK preinstalled; ensure the
+      # platform/build-tools this project needs (35) are present.
+      - name: Ensure Android SDK 35
+        run: |
+          echo "ANDROID_HOME=$ANDROID_HOME"
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null 2>&1 || true
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
+            "platforms;android-35" "build-tools;35.0.0" "platform-tools" || true
+          ls "$ANDROID_HOME/platforms" "$ANDROID_HOME/build-tools"
       - name: Unit tests (crypto parity vs desktop golden vector)
         working-directory: android
         run: ./gradlew testDebugUnitTest --no-daemon
