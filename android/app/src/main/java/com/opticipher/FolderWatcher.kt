@@ -39,6 +39,7 @@ object FolderWatcher {
     private const val MOVE = "move_original"
     private const val PROCESSED = "processed"
     private const val WATCHING = "watching"
+    private const val INTERVAL = "interval_minutes" // 0 = immediate (observer) only
     const val WORK = "opticipher-folder-watch"
 
     private var observer: ContentObserver? = null
@@ -63,11 +64,19 @@ object FolderWatcher {
             EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
             EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM)
     }
+    // The watch passphrase is independent of the manual batch passphrase.
+    // Stored only when the watch "remember" toggle is on; the worker reads
+    // it so background processing can run unattended. (Falls back to the
+    // legacy "passphrase" key from earlier builds.)
     fun storePassphraseIfEnabled(ctx: Context, pass: String) {
-        if (isRemembering(ctx)) encPrefs(ctx).edit().putString("passphrase", pass).apply()
+        if (isRemembering(ctx)) encPrefs(ctx).edit().putString("watch_passphrase", pass).apply()
     }
     fun restorePassphraseIfEnabled(ctx: Context): String? =
-        if (isRemembering(ctx)) try { encPrefs(ctx).getString("passphrase", null) } catch (_: Exception) { null } else null
+        if (isRemembering(ctx)) try {
+            encPrefs(ctx).getString("watch_passphrase", null) ?: encPrefs(ctx).getString("passphrase", null)
+        } catch (_: Exception) { null } else null
+    fun setIntervalMinutes(ctx: Context, minutes: Int) = prefs(ctx).edit().putInt(INTERVAL, minutes).apply()
+    fun getIntervalMinutes(ctx: Context): Int = prefs(ctx).getInt(INTERVAL, 15)
 
     fun startWatching(ctx: Context) {
         val inbox = getInbox(ctx) ?: return
@@ -81,8 +90,13 @@ object FolderWatcher {
         // fallback (some OEM file managers don't fire change events reliably).
         try { app.contentResolver.registerContentObserver(inbox, true, observer!!) } catch (_: Exception) {}
         enqueue(app)
-        val periodic = PeriodicWorkRequestBuilder<WatchWorker>(15, TimeUnit.MINUTES).build()
-        WorkManager.getInstance(app).enqueueUniquePeriodicWork(WORK, ExistingPeriodicWorkPolicy.KEEP, periodic)
+        // Polling interval is user-configurable; 0 = observer-only ("Immediately").
+        // WorkManager's periodic minimum is 15 minutes.
+        val interval = getIntervalMinutes(app)
+        if (interval > 0) {
+            val periodic = PeriodicWorkRequestBuilder<WatchWorker>(interval.toLong(), TimeUnit.MINUTES).build()
+            WorkManager.getInstance(app).enqueueUniquePeriodicWork(WORK, ExistingPeriodicWorkPolicy.UPDATE, periodic)
+        }
     }
 
     fun stopWatching(ctx: Context, keepFlag: Boolean = false) {
@@ -117,7 +131,7 @@ class WatchWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx,
             val inboxUri = FolderWatcher.getInbox(applicationContext) ?: return@withContext Result.success()
             val pass = FolderWatcher.restorePassphraseIfEnabled(applicationContext)
             if (pass == null) {
-                FolderWatcher.notify(applicationContext, "OptiCipher: files waiting — open the app and enter your passphrase to process them")
+                FolderWatcher.notify(applicationContext, "OptiCipher: files waiting — set the watch passphrase (remembered) in the Folder watch section to process them in the background")
                 return@withContext Result.success()
             }
             val inbox = DocumentFile.fromTreeUri(applicationContext, inboxUri) ?: return@withContext Result.success()

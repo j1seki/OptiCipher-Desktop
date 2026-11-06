@@ -395,9 +395,17 @@ it (`OptiCipher-android.apk`) to the GitHub Release alongside the desktop
 installers. The debug APK is unsigned-for-release — sideload it directly, or
 sign it with your own keystore for distribution.
 
-**What the app does:** Encrypt / Decrypt / Verify with file pickers, live
-preview, share/open intents from other apps, KDF cost control, and safe
-(non-overwriting) outputs to a chosen folder or app storage.
+**What the app does:** two independent sections, matching the workflow:
+
+1. **Batch job** — pick **images or a whole folder** (top level) into a
+   visible queue, set the output folder and passphrase, then press **Start**
+   (nothing runs on pick). Encrypt / Decrypt / Verify, live preview,
+   share/open intents, KDF cost control, safe (non-overwriting) outputs.
+2. **Folder watch** — its **own passphrase** (with its own encrypted
+   "remember" toggle), its **own output folder**, its **own mode**
+   (encrypt/decrypt new files) and a **check interval** (immediately via
+   observer only, or poll every 15 min / 1 h / 6 h). Neither section shares
+   passphrase, output or mode with the other.
 
 **Folder watching — auto encrypt/decrypt.** Android's scoped storage (10+)
 has no general "watch any folder", so the app uses the supported path:
@@ -406,16 +414,18 @@ has no general "watch any folder", so the app uses the supported path:
    (`ACTION_OPEN_DOCUMENT_TREE`); the app keeps a **persistable URI
    permission** (survives reboot, no broad storage permission — `MANAGE_EXTERNAL_STORAGE`
    is deliberately avoided: Play policy would reject it).
-2. A **`ContentObserver`** on that tree queues new/changed files, plus a
-   **WorkManager periodic poll (15 min)** as fallback for OEM file managers.
+2. A **`ContentObserver`** on that tree queues new/changed files immediately,
+   plus an optional **WorkManager periodic poll** (15 min / 1 h / 6 h,
+   selectable; "Immediately" means observer-only) as fallback for OEM file
+   managers that don't fire change events reliably.
 3. Each new PNG is checked for an existing **`OPTC` header** (by content, not
    filename) so already-encrypted files are never re-encrypted; the output
-   folder is excluded to prevent loops. Outputs go to the chosen output
-   folder — **never overwriting** (`_2`, `_3`…) — and originals are copied
-   by default (move is an opt-in toggle).
-4. A passphrase is required to process. Default is *in-memory only* (the
-   watcher queues files and notifies "open the app to process"); enabling
-   **"Remember passphrase"** stores it in `EncryptedSharedPreferences`
+   folder is excluded to prevent loops. Outputs go to the watch's **own**
+   output folder — **never overwriting** (`_2`, `_3`…) — and originals are
+   copied by default (move is an opt-in toggle).
+4. The watch uses its **own passphrase**, independent of the batch job's.
+   Default is *not stored* (the watcher queues files and notifies); enabling
+   **"Remember watch passphrase"** stores it in `EncryptedSharedPreferences`
    (AES-256) so background processing runs unattended. Nothing is ever sent
    anywhere.
 

@@ -13,7 +13,6 @@
         app:elevation="0dp">
 
         <com.google.android.material.appbar.MaterialToolbar
-            android:id="@+id/appBar"
             android:layout_width="match_parent"
             android:layout_height="?attr/actionBarSize"
             app:title="OptiCipher"
@@ -35,6 +34,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content">
 
+            <!-- ============ MANUAL BATCH JOB ============ -->
             <com.google.android.material.card.MaterialCardView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
@@ -48,8 +48,14 @@
                     android:layout_height="wrap_content">
 
                     <TextView
-                        android:text="Encrypt / Decrypt / Verify"
+                        android:text="1 · Batch job"
                         android:textAppearance="?attr/textAppearanceTitleMedium"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content" />
+
+                    <TextView
+                        android:text="Pick files or a whole folder, review the queue, then press Start. Nothing runs until you do."
+                        android:textAppearance="?attr/textAppearanceBodySmall"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content" />
 
@@ -82,6 +88,41 @@
 
                     </com.google.android.material.chip.ChipGroup>
 
+                    <LinearLayout
+                        android:orientation="horizontal"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content">
+
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/pickBtn"
+                            android:text="Pick images…"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1" />
+
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/pickFolderBtn"
+                            style="?attr/materialButtonOutlinedStyle"
+                            android:text="Pick folder…"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1" />
+
+                    </LinearLayout>
+
+                    <TextView
+                        android:id="@+id/queueView"
+                        android:text="Queue is empty."
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content" />
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/clearQueueBtn"
+                        style="@style/Widget.Material3.Button.TextButton"
+                        android:text="Clear queue"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content" />
+
                     <com.google.android.material.textfield.TextInputLayout
                         android:hint="Passphrase"
                         app:endIconMode="none"
@@ -110,16 +151,22 @@
                         android:valueTo="2000000"
                         android:stepSize="10000" />
 
-                    <com.google.android.material.button.MaterialButton
-                        android:id="@+id/pickBtn"
-                        android:text="Pick images…"
-                        android:layout_width="match_parent"
+                    <TextView
+                        android:id="@+id/manualOutView"
+                        android:layout_width="wrap_content"
                         android:layout_height="wrap_content" />
 
                     <com.google.android.material.button.MaterialButton
                         android:id="@+id/outputBtn"
                         style="?attr/materialButtonOutlinedStyle"
                         android:text="Set output folder…"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content" />
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/startBtn"
+                        android:text="▶  Start"
+                        android:enabled="false"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content" />
 
@@ -140,6 +187,7 @@
 
             </com.google.android.material.card.MaterialCardView>
 
+            <!-- ============ FOLDER WATCH (independent settings) ============ -->
             <com.google.android.material.card.MaterialCardView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
@@ -152,9 +200,110 @@
                     android:layout_height="wrap_content">
 
                     <TextView
-                        android:text="Folder watch — auto encrypt/decrypt"
+                        android:text="2 · Folder watch — auto encrypt/decrypt"
                         android:textAppearance="?attr/textAppearanceTitleMedium"
                         android:layout_width="wrap_content"
+                        android:layout_height="wrap_content" />
+
+                    <TextView
+                        android:text="Runs in the background with its own passphrase, output folder and check interval — independent of the batch job above."
+                        android:textAppearance="?attr/textAppearanceBodySmall"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content" />
+
+                    <com.google.android.material.chip.ChipGroup
+                        android:id="@+id/watchModeGroup"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content">
+
+                        <com.google.android.material.chip.Chip
+                            android:id="@+id/watchModeEncrypt"
+                            android:text="Encrypt new files"
+                            android:checkable="true"
+                            android:checked="true"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content" />
+
+                        <com.google.android.material.chip.Chip
+                            android:id="@+id/watchModeDecrypt"
+                            android:text="Decrypt new files"
+                            android:checkable="true"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content" />
+
+                    </com.google.android.material.chip.ChipGroup>
+
+                    <com.google.android.material.textfield.TextInputLayout
+                        android:hint="Watch passphrase (for background processing)"
+                        app:endIconMode="none"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content">
+
+                        <com.google.android.material.textfield.TextInputEditText
+                            android:id="@+id/watchPass"
+                            android:inputType="textPassword"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content" />
+
+                    </com.google.android.material.textfield.TextInputLayout>
+
+                    <com.google.android.material.checkbox.MaterialCheckBox
+                        android:id="@+id/watchRememberChk"
+                        android:text="Remember watch passphrase (encrypted — required for background runs)"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content" />
+
+                    <TextView
+                        android:text="Check for new files every:"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content" />
+
+                    <com.google.android.material.chip.ChipGroup
+                        android:id="@+id/intervalGroup"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content">
+
+                        <com.google.android.material.chip.Chip
+                            android:id="@+id/intervalImmediate"
+                            android:text="Immediately"
+                            android:checkable="true"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content" />
+
+                        <com.google.android.material.chip.Chip
+                            android:id="@+id/interval15"
+                            android:text="15 min"
+                            android:checkable="true"
+                            android:checked="true"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content" />
+
+                        <com.google.android.material.chip.Chip
+                            android:id="@+id/interval60"
+                            android:text="1 hour"
+                            android:checkable="true"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content" />
+
+                        <com.google.android.material.chip.Chip
+                            android:id="@+id/interval360"
+                            android:text="6 hours"
+                            android:checkable="true"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content" />
+
+                    </com.google.android.material.chip.ChipGroup>
+
+                    <TextView
+                        android:id="@+id/watchOutView"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content" />
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/watchOutBtn"
+                        style="?attr/materialButtonOutlinedStyle"
+                        android:text="Set watch output folder…"
+                        android:layout_width="match_parent"
                         android:layout_height="wrap_content" />
 
                     <TextView
@@ -189,12 +338,6 @@
                             android:layout_height="wrap_content" />
 
                     </LinearLayout>
-
-                    <com.google.android.material.checkbox.MaterialCheckBox
-                        android:id="@+id/rememberChk"
-                        android:text="Remember passphrase (encrypted, enables background processing)"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content" />
 
                     <com.google.android.material.checkbox.MaterialCheckBox
                         android:id="@+id/moveChk"

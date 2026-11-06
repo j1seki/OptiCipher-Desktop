@@ -1,6 +1,7 @@
 package com.opticipher
 
 import android.Manifest
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
@@ -14,8 +15,8 @@ import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
-import androidx.appcompat.app.AlertDialog
 import androidx.activity.enableEdgeToEdge
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
@@ -24,82 +25,144 @@ import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.documentfile.provider.DocumentFile
 import com.google.android.material.button.MaterialButton
-import com.google.android.material.chip.Chip
 import com.google.android.material.chip.ChipGroup
 import com.google.android.material.slider.Slider
 import com.google.android.material.textfield.TextInputEditText
 import java.io.File
 
 class MainActivity : AppCompatActivity() {
+    // ---- Manual batch job state (queue first, process only on Start) ----
+    private val queue = mutableListOf<Uri>()
+    private var manualOutputUri: Uri? = null
+
     private lateinit var passInput: TextInputEditText
     private lateinit var iterSlider: Slider
     private lateinit var iterLabel: TextView
+    private lateinit var queueView: TextView
+    private lateinit var startBtn: MaterialButton
     private lateinit var results: LinearLayout
     private lateinit var preview: ImageView
+    private lateinit var manualOutView: TextView
+
+    // ---- Folder watch state (independent passphrase / output / interval) ----
+    private lateinit var watchPassInput: TextInputEditText
     private lateinit var watchStatus: TextView
-    private var mode = "encrypt" // or "decrypt" / "verify"
-    private var outputTreeUri: Uri? = null
-    private val pickFiles = registerForActivityResult(androidx.activity.result.contract.ActivityResultContracts.OpenMultipleDocuments()) { uris -> processUris(uris) }
-    private val pickOutputTree = registerForActivityResult(androidx.activity.result.contract.ActivityResultContracts.OpenDocumentTree()) { uri ->
-        if (uri != null) { outputTreeUri = uri; takePersistable(uri); FolderWatcher.setOutputTree(this, uri); toast("Output folder set") }
+    private lateinit var watchOutView: TextView
+    private var mode = "encrypt"
+
+    private val pickFiles = registerForActivityResult(androidx.activity.result.contract.ActivityResultContracts.OpenMultipleDocuments()) { uris ->
+        if (uris.isEmpty()) toast("No images picked") else { queue.addAll(uris); refreshQueue() }
+    }
+    private val pickFolder = registerForActivityResult(androidx.activity.result.contract.ActivityResultContracts.OpenDocumentTree()) { uri ->
+        if (uri == null) { toast("No folder picked"); return@registerForActivityResult }
+        takePersistable(uri)
+        val tree = DocumentFile.fromTreeUri(this, uri)
+        val images = tree?.listFiles()?.filter { it.isFile && isImageName(it.name) } ?: emptyList()
+        if (images.isEmpty()) toast("No image files in that folder (top level)")
+        else { queue.addAll(images.map { it.uri }); refreshQueue(); toast("Added ${images.size} image(s) from folder") }
+    }
+    private val pickManualOutput = registerForActivityResult(androidx.activity.result.contract.ActivityResultContracts.OpenDocumentTree()) { uri ->
+        if (uri != null) {
+            manualOutputUri = uri; takePersistable(uri)
+            getSharedPreferences("manual", Context.MODE_PRIVATE).edit().putString("output_uri", uri.toString()).apply()
+            refreshOutputs(); toast("Batch output folder set")
+        }
+    }
+    private val pickWatchOutput = registerForActivityResult(androidx.activity.result.contract.ActivityResultContracts.OpenDocumentTree()) { uri ->
+        if (uri != null) { takePersistable(uri); FolderWatcher.setOutputTree(this, uri); refreshOutputs(); toast("Watch output folder set") }
     }
     private val pickWatchInbox = registerForActivityResult(androidx.activity.result.contract.ActivityResultContracts.OpenDocumentTree()) { uri ->
         if (uri != null) {
             takePersistable(uri)
             FolderWatcher.setInbox(this, uri)
+            saveWatchSettings()
             FolderWatcher.startWatching(this)
             refreshWatchStatus()
-            toast("Watching folder set — new images will be queued for $mode")
+            toast("Watching folder set — new images will be queued")
         } else toast("No folder picked")
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        // Edge-to-edge: draw behind the status/navigation bars but pad the
-        // content by the system insets so nothing sits under them.
         enableEdgeToEdge()
         setContentView(R.layout.activity_main)
         val root = findViewById<View>(R.id.root)
-        val scroll = findViewById<View>(R.id.scroll)
         ViewCompat.setOnApplyWindowInsetsListener(root) { v, insets ->
             val sys = insets.getInsets(WindowInsetsCompat.Type.systemBars())
-            // Top: status bar (AppBar sits below it, scroll below that).
             v.setPadding(0, sys.top, 0, sys.bottom)
             insets
         }
         passInput = findViewById(R.id.pass)
         iterSlider = findViewById(R.id.iter); iterLabel = findViewById(R.id.iterLabel)
+        queueView = findViewById(R.id.queueView); startBtn = findViewById(R.id.startBtn)
         results = findViewById(R.id.results); preview = findViewById(R.id.preview)
-        watchStatus = findViewById(R.id.watchStatus)
+        manualOutView = findViewById(R.id.manualOutView)
+        watchPassInput = findViewById(R.id.watchPass)
+        watchStatus = findViewById(R.id.watchStatus); watchOutView = findViewById(R.id.watchOutView)
+
+        manualOutputUri = getSharedPreferences("manual", Context.MODE_PRIVATE).getString("output_uri", null)?.let { Uri.parse(it) }
+
         iterSlider.value = 200000f
         updateIterLabel()
         iterSlider.addOnChangeListener { _, v, _ -> iterSlider.value = v; updateIterLabel() }
+
+        // ---- Manual job wiring ----
         val chipGroup = findViewById<ChipGroup>(R.id.modeGroup)
         chipGroup.setOnCheckedStateChangeListener { _, checkedIds ->
             mode = when (checkedIds.firstOrNull()) {
                 R.id.modeDecrypt -> "decrypt"; R.id.modeVerify -> "verify"; else -> "encrypt"
             }
-            if (mode != "verify") FolderWatcher.setMode(this, mode)
-            refreshWatchStatus()
         }
         findViewById<MaterialButton>(R.id.pickBtn).setOnClickListener { pickFiles.launch(arrayOf("image/*")) }
-        findViewById<MaterialButton>(R.id.outputBtn).setOnClickListener { pickOutputTree.launch(null) }
+        findViewById<MaterialButton>(R.id.pickFolderBtn).setOnClickListener { pickFolder.launch(null) }
+        findViewById<MaterialButton>(R.id.clearQueueBtn).setOnClickListener { queue.clear(); refreshQueue() }
+        findViewById<MaterialButton>(R.id.outputBtn).setOnClickListener { pickManualOutput.launch(null) }
+        startBtn.setOnClickListener { startBatch() }
+
+        // ---- Folder watch wiring (own passphrase / output / interval / mode) ----
+        val watchModeGroup = findViewById<ChipGroup>(R.id.watchModeGroup)
+        watchModeGroup.setOnCheckedStateChangeListener { _, checkedIds ->
+            FolderWatcher.setMode(this, if (checkedIds.firstOrNull() == R.id.watchModeDecrypt) "decrypt" else "encrypt")
+            refreshWatchStatus()
+        }
+        val intervalGroup = findViewById<ChipGroup>(R.id.intervalGroup)
+        intervalGroup.setOnCheckedStateChangeListener { _, checkedIds ->
+            val minutes = when (checkedIds.firstOrNull()) {
+                R.id.intervalImmediate -> 0; R.id.interval60 -> 60; R.id.interval360 -> 360; else -> 15
+            }
+            FolderWatcher.setIntervalMinutes(this, minutes)
+            if (FolderWatcher.isWatching(this)) FolderWatcher.startWatching(this) // reschedule with new interval
+            toast("Watch interval: ${intervalLabel(minutes)}")
+        }
+        findViewById<MaterialButton>(R.id.watchOutBtn).setOnClickListener { pickWatchOutput.launch(null) }
         findViewById<MaterialButton>(R.id.watchBtn).setOnClickListener { pickWatchInbox.launch(null) }
         findViewById<MaterialButton>(R.id.watchStartBtn).setOnClickListener {
-            val inbox = FolderWatcher.getInbox(this)
-            if (inbox == null) { toast("Pick a watched folder first"); pickWatchInbox.launch(null) }
-            else { FolderWatcher.startWatching(this); refreshWatchStatus(); toast("Folder watching started") }
+            if (FolderWatcher.getInbox(this) == null) { toast("Pick a watched folder first"); pickWatchInbox.launch(null) }
+            else { saveWatchSettings(); FolderWatcher.startWatching(this); refreshWatchStatus(); toast("Folder watching started") }
         }
         findViewById<MaterialButton>(R.id.watchOffBtn).setOnClickListener {
-            FolderWatcher.stopWatching(this); refreshWatchStatus(); toast("Folder watching stopped")
+            saveWatchSettings(); FolderWatcher.stopWatching(this); refreshWatchStatus(); toast("Folder watching stopped")
         }
-        findViewById<MaterialButton>(R.id.permBtn).setOnClickListener { showPermissionsDialog() }
-        findViewById<com.google.android.material.checkbox.MaterialCheckBox>(R.id.rememberChk)
-            .setOnCheckedChangeListener { _, c -> FolderWatcher.setRememberPassphrase(this, c); toast(if (c) "Passphrase will be remembered (encrypted)" else "Passphrase will not be stored") }
+        findViewById<com.google.android.material.checkbox.MaterialCheckBox>(R.id.watchRememberChk)
+            .setOnCheckedChangeListener { _, c ->
+                FolderWatcher.setRememberPassphrase(this, c)
+                if (c) FolderWatcher.storePassphraseIfEnabled(this, watchPassInput.text.toString())
+                toast(if (c) "Watch passphrase will be remembered (encrypted)" else "Watch passphrase will not be stored")
+            }
         findViewById<com.google.android.material.checkbox.MaterialCheckBox>(R.id.moveChk)
             .setOnCheckedChangeListener { _, c -> FolderWatcher.setMoveOriginal(this, c) }
-        FolderWatcher.restorePassphraseIfEnabled(this)?.let { passInput.setText(it) }
-        refreshWatchStatus()
+        findViewById<MaterialButton>(R.id.permBtn).setOnClickListener { showPermissionsDialog() }
+
+        // Restore watch settings into the UI
+        watchPassInput.setText(FolderWatcher.restorePassphraseIfEnabled(this) ?: "")
+        findViewById<com.google.android.material.checkbox.MaterialCheckBox>(R.id.watchRememberChk).isChecked = FolderWatcher.isRemembering(this)
+        findViewById<com.google.android.material.checkbox.MaterialCheckBox>(R.id.moveChk).isChecked = FolderWatcher.isMoveOriginal(this)
+        val watchMode = FolderWatcher.getMode(this)
+        watchModeGroup.check(if (watchMode == "decrypt") R.id.watchModeDecrypt else R.id.watchModeEncrypt)
+        val interval = FolderWatcher.getIntervalMinutes(this)
+        intervalGroup.check(when (interval) { 0 -> R.id.intervalImmediate; 60 -> R.id.interval60; 360 -> R.id.interval360; else -> R.id.interval15 })
+
+        refreshQueue(); refreshOutputs(); refreshWatchStatus()
         handleShareIntent(intent)
     }
 
@@ -108,24 +171,39 @@ class MainActivity : AppCompatActivity() {
         val uris = mutableListOf<Uri>()
         if (intent?.action == Intent.ACTION_SEND) intent.getParcelableExtra<Uri>(Intent.EXTRA_STREAM)?.let { uris.add(it) }
         if (intent?.action == Intent.ACTION_VIEW && intent.data != null) uris.add(intent.data!!)
-        if (uris.isNotEmpty()) processUris(uris)
+        if (uris.isNotEmpty()) { queue.addAll(uris); refreshQueue(); toast("Added ${uris.size} shared image(s) to the queue — press Start") }
     }
+
+    private fun intervalLabel(minutes: Int) = when (minutes) { 0 -> "immediately (observer only)"; 60 -> "every hour"; 360 -> "every 6 hours"; else -> "every 15 minutes" }
+    private fun isImageName(name: String?) = name?.lowercase()?.endsWith(".png") == true || name?.lowercase()?.endsWith(".jpg") == true ||
+        name?.lowercase()?.endsWith(".jpeg") == true || name?.lowercase()?.endsWith(".webp") == true || name?.lowercase()?.endsWith(".bmp") == true
 
     private fun updateIterLabel() { iterLabel.text = "KDF cost: ${iterSlider.value.toInt()} iterations" }
     private fun takePersistable(uri: Uri) {
         try { contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION) } catch (_: Exception) {}
     }
+    private fun refreshQueue() {
+        queueView.text = if (queue.isEmpty()) "Queue is empty. Pick images or a folder to add them."
+        else "Queue (${queue.size}):\n" + queue.take(8).joinToString("\n") { "• ${it.lastPathSegment}" } + if (queue.size > 8) "\n• …and ${queue.size - 8} more" else ""
+        startBtn.isEnabled = queue.isNotEmpty()
+    }
+    private fun refreshOutputs() {
+        manualOutView.text = "Batch output: ${manualOutputUri ?: "app storage (OptiCipher folder)"}"
+        watchOutView.text = "Watch output: ${FolderWatcher.getOutputTree(this) ?: "app storage (OptiCipher folder)"}"
+    }
     private fun refreshWatchStatus() {
         val inbox = FolderWatcher.getInbox(this)
+        val interval = FolderWatcher.getIntervalMinutes(this)
         watchStatus.text = if (FolderWatcher.isWatching(this) && inbox != null)
-            "● Watching: $inbox\nNew images here are queued for ${FolderWatcher.getMode(this)} (background processing needs the passphrase remembered)."
-        else "○ Folder watch: off.${if (inbox != null) " Last folder: $inbox — tap Start to resume." else " Pick a watched folder to auto-encrypt/decrypt new files there."}"
+            "● Watching: $inbox\nMode: ${FolderWatcher.getMode(this)}, checking ${intervalLabel(interval)}.\nOutput: ${FolderWatcher.getOutputTree(this) ?: "app storage"}"
+        else "○ Folder watch: off.${if (inbox != null) " Last folder: $inbox — tap Start to resume." else " Pick a watched folder to begin."}"
+    }
+    private fun saveWatchSettings() {
+        // Persist the watch passphrase only if its own remember toggle is on.
+        if (FolderWatcher.isRemembering(this)) FolderWatcher.storePassphraseIfEnabled(this, watchPassInput.text.toString())
     }
 
     // --- Permissions & battery settings -----------------------------------
-    // Always gives feedback: shows the current status of every permission
-    // and offers working buttons to request them or open the right Settings
-    // screen (app settings / battery optimisation / notifications).
     private fun permStatus(name: String): String =
         if (ContextCompat.checkSelfPermission(this, name) == PackageManager.PERMISSION_GRANTED) "granted ✓" else "not granted ✗"
 
@@ -164,32 +242,31 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun openAppSettings() {
-        try {
-            startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName")))
-        } catch (e: Exception) { toast("Could not open settings: ${e.message}"); startActivity(Intent(Settings.ACTION_SETTINGS)) }
+        try { startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName"))) }
+        catch (e: Exception) { toast("Could not open settings: ${e.message}"); startActivity(Intent(Settings.ACTION_SETTINGS)) }
     }
 
     private fun openBatterySettings() {
-        // Direct exemption request first; fall back to the battery screen,
-        // then to app settings — never fail silently.
         val intents = listOf(
             Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:$packageName")),
             Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS),
             Intent(Settings.ACTION_BATTERY_SAVER_SETTINGS),
         )
-        for (intent in intents) {
-            try { startActivity(intent); return } catch (_: Exception) { /* try next */ }
-        }
+        for (intent in intents) { try { startActivity(intent); return } catch (_: Exception) {} }
         toast("Could not open battery settings — use App settings instead")
         openAppSettings()
     }
 
-    private fun processUris(uris: List<Uri>) {
+    // --- Batch execution (only on Start) ----------------------------------
+    private fun startBatch() {
+        if (queue.isEmpty()) { toast("Queue is empty — pick images or a folder first"); return }
         val pass = passInput.text.toString()
         if (mode != "verify" && pass.isEmpty()) { toast("Enter a passphrase first"); return }
-        FolderWatcher.storePassphraseIfEnabled(this, pass)
+        val batch = queue.toList()
+        queue.clear(); refreshQueue()
+        startBtn.isEnabled = false; startBtn.text = "Working…"
         Thread {
-            for (uri in uris) {
+            for (uri in batch) {
                 try {
                     val img = loadImage(uri)
                     val result = when (mode) {
@@ -205,6 +282,7 @@ class MainActivity : AppCompatActivity() {
                     showResult(uri.lastPathSegment ?: "file", "ERROR: ${e.message}", null)
                 }
             }
+            runOnUiThread { startBtn.text = "▶  Start"; startBtn.isEnabled = queue.isNotEmpty() }
         }.start()
     }
 
@@ -227,8 +305,8 @@ class MainActivity : AppCompatActivity() {
 
     private fun writeOutput(img: ImageData, name: String): File {
         val png = encodePNG(img.pixels, img.width, img.height, img.channels)
-        if (outputTreeUri != null) {
-            val tree = DocumentFile.fromTreeUri(this, outputTreeUri!!)!!
+        if (manualOutputUri != null) {
+            val tree = DocumentFile.fromTreeUri(this, manualOutputUri!!)!!
             var candidate = tree.createFile("image/png", name) ?: throw IllegalStateException("cannot create output file")
             var finalName = name; var n = 2
             while (tree.findFile(finalName) != null) { finalName = name.substringBeforeLast('.') + "_${n++}.png"; candidate = tree.createFile("image/png", finalName)!! }
