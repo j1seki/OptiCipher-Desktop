@@ -84,12 +84,11 @@ so background processing works unattended. Nothing is ever sent anywhere.
 | Background work | `POST_NOTIFICATIONS` (13+), battery-optimisation exemption prompt | completion notice; WorkManager not throttled |
 | During a batch | `FOREGROUND_SERVICE_DATA_SYNC` (14+, declared in manifest) | long batches |
 
-### Known limitations
+### Image format decoding
 
-- Semi-transparent RGBA via `BitmapFactory` is lossy (Android premultiplies
-  alpha); opaque photos and all PNG ciphertexts (exact codec) are unaffected —
-  the same caveat applies to the web canvas fallback.
-- The pure-Kotlin PCG64 uses `BigInteger` for 128-bit state; fine for photos,
-  worth optimising if batch-processing very large libraries.
-- Same threat model as desktop: PBKDF2 is memory-cheap. Read the README
-  before protecting anything sensitive.
+- Android uses LibRaw for camera RAW and Android `ImageDecoder` for HEIF/AVIF. HEIC/HEIF requires Android 9+; AVIF requires Android 12+. On older versions the app reports an unsupported-format error rather than silently substituting a preview.
+- Web bundles icodec for HEIC/HEIF and AVIF, and FlashRaw for camera RAW. JPEG, WebP and GIF use the browser's native decoder.
+- RAW coverage is decoder/camera-model dependent, not universal. Unsupported RAW variants fail with a per-file error.
+- Android bitmap decoding may premultiply semi-transparent pixels; PNG ciphertext always uses the exact PNG decoder.
+- The pure-Kotlin PCG64 uses `BigInteger` for 128-bit state; fine for photos, worth optimising if batch-processing very large libraries.
+- Same threat model as desktop: PBKDF2 is memory-cheap. Read the README before protecting anything sensitive.
