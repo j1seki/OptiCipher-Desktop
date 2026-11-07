@@ -21,7 +21,7 @@
 </nav>
 
 <section id="tab-encrypt" class="panel">
-  <label class="drop" id="drop-encrypt">Drop images or <input type="file" id="files-encrypt" accept="image/*" multiple/> multiply-select</label>
+  <label class="drop" id="drop-encrypt">Drop images or <input type="file" id="files-encrypt" accept="image/*,.dng,.cr2,.cr3,.crw,.nef,.nrw,.arw,.sr2,.srf,.raf,.rw2,.rwl,.orf,.ori,.pef,.srw,.mrw,.iiq,.mos,.3fr,.fff,.kdc,.dcr,.dcs,.erf,.mef,.x3f,.ari" multiple/> multiply-select</label>
   <div class="row"><label>Passphrase <input type="password" id="pass-encrypt" autocomplete="off"/></label>
   <label>Confirm <input type="password" id="pass2-encrypt" autocomplete="off"/></label></div>
   <label>KDF cost (PBKDF2 iterations) <input type="range" id="iter-encrypt" min="10000" max="2000000" step="10000" value="200000"/> <output id="iter-out">200000</output></label>
@@ -44,7 +44,7 @@
 </section>
 
 <section id="tab-analyze" class="panel hidden">
-  <label class="drop" id="drop-analyze">Drop image(s) — add a second for NPCR/UACI <input type="file" id="files-analyze" accept="image/*" multiple/></label>
+  <label class="drop" id="drop-analyze">Drop image(s) — add a second for NPCR/UACI <input type="file" id="files-analyze" accept="image/*,.dng,.cr2,.cr3,.crw,.nef,.nrw,.arw,.sr2,.srf,.raf,.rw2,.rwl,.orf,.ori,.pef,.srw,.mrw,.iiq,.mos,.3fr,.fff,.kdc,.dcr,.dcs,.erf,.mef,.x3f,.ari" multiple/></label>
   <button id="run-analyze">Run analysis</button>
   <div id="out-analyze" class="results"></div>
   <canvas id="hist" width="640" height="220"></canvas>
