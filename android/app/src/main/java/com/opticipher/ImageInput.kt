@@ -98,7 +98,7 @@ object ImageInput {
             return ImageData(pixels, bitmap.width, bitmap.height, channels)
         } finally {
             if (bitmap !== source) bitmap.recycle()
-            source.recycle()
+            if (source.config != Bitmap.Config.HARDWARE) source.recycle()
         }
     }
 
