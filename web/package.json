@@ -9,7 +9,7 @@
   "dependencies": {
     "pako": "^3.0.3",
     "icodec": "^0.6.0",
-    "flashraw": "^0.1.1"
+    "flashraw": "^0.1.0"
   },
   "devDependencies": {
     "esbuild": "^0.28.2"
