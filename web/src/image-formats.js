@@ -4,14 +4,8 @@ import heicWasmUrl from 'icodec/heic-dec.wasm';
 import avifWasmUrl from 'icodec/avif-dec.wasm';
 import flashRawWasmUrl from 'flashraw/wasm/simd';
 import { decodePNG } from './png.js';
-
-export const GOOGLE_PHOTOS_EXTENSIONS = Object.freeze([
-  '.jpg', '.jpeg', '.heic', '.heif', '.png', '.webp', '.gif', '.avif',
-  '.dng', '.cr2', '.cr3', '.crw', '.nef', '.nrw', '.arw', '.sr2', '.srf',
-  '.raf', '.rw2', '.rwl', '.orf', '.ori', '.pef', '.srw', '.mrw', '.iiq',
-  '.mos', '.3fr', '.fff', '.kdc', '.dcr', '.dcs', '.erf', '.mef', '.x3f',
-  '.ari'
-]);
+import { GOOGLE_PHOTOS_EXTENSIONS } from './image-format-list.js';
+export { GOOGLE_PHOTOS_EXTENSIONS } from './image-format-list.js';
 
 const RAW_EXTENSIONS = new Set(GOOGLE_PHOTOS_EXTENSIONS.filter(ext =>
   !['.jpg', '.jpeg', '.heic', '.heif', '.png', '.webp', '.gif', '.avif'].includes(ext)
@@ -72,9 +66,9 @@ async function decodeRaw(file) {
 
 export async function loadImage(file) {
   const ext = (file.name.match(/\.[^.]+$/)?.[0] || '').toLowerCase();
-  const bytes = new Uint8Array(await file.arrayBuffer());
   if (ext === '.png' || file.type === 'image/png') {
-    try { return { ...decodePNG(bytes), name: file.name }; }
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    try { return { ...decodePNG(bytes), name: file.name };
     catch (error) { throw new Error(`PNG could not be decoded losslessly: ${error.message}`); }
   }
   if (ext === '.heic' || ext === '.heif') return decodeHeif(file, false);
