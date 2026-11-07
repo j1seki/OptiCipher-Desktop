@@ -35,7 +35,7 @@ import os
 from typing import Iterable, List, Optional
 
 from PySide6.QtCore import QSize, Qt, Signal
-from PySide6.QtGui import QColor, QIcon, QPainter, QPixmap
+from PySide6.QtGui import QColor, QIcon, QImage, QPainter, QPixmap
 from PySide6.QtWidgets import (
     QFileDialog,
     QFrame,
@@ -767,9 +767,21 @@ class PreviewBox(QFrame):
         """Show the image at `path`; returns False when it cannot be read."""
         pix = QPixmap(path)
         if pix.isNull():
-            self._label.setText("(cannot load preview)")
-            self.enlarge_btn.setEnabled(False)
-            return False
+            # Qt image plugins do not consistently decode HEIC, AVIF or RAW.
+            # Use the same optional decoder stack as the encryption pipeline.
+            try:
+                import numpy as np
+                from opticipher.io_image import load_image
+
+                pixels = np.ascontiguousarray(load_image(path))
+                height, width, channels = pixels.shape
+                image_format = QImage.Format_RGB888 if channels == 3 else QImage.Format_RGBA8888
+                image = QImage(pixels.data, width, height, width * channels, image_format).copy()
+                pix = QPixmap.fromImage(image)
+            except Exception:
+                self._label.setText("(cannot load preview)")
+                self.enlarge_btn.setEnabled(False)
+                return False
         self._pixmap = pix
         self._path = path
         self._label.setText("")
