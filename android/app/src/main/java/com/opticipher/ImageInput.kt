@@ -24,7 +24,7 @@ object ImageInput {
                 ?: error("cannot open RAW image")
             descriptor.use { pfd ->
                 LibRaw().use { raw ->
-                    val status = raw.openFd(pfd.fileDescriptor.fd)
+                    val status = raw.openFd(pfd.fd)
                     if (status != 0) throw ErrnoException("LibRaw openFd", status)
                     val bitmap = raw.decodeBitmap(BitmapFactory.Options().apply {
                         inPreferredConfig = Bitmap.Config.ARGB_8888
@@ -41,7 +41,13 @@ object ImageInput {
     fun decodeBytes(context: Context, bytes: ByteArray, name: String): ImageData {
         if (bytes.size >= 8 && bytes[0] == 137.toByte() &&
             bytes[1] == 80.toByte() && bytes[2] == 78.toByte() && bytes[3] == 71.toByte()
-        ) return decodePNG(bytes)
+        ) {
+            try { return decodePNG(bytes) }
+            catch (_: Exception) {
+                // Native fallback handles valid 16-bit/interlaced source PNGs.
+                // OptiCipher ciphertext remains on the exact decoder path.
+            }
+        }
 
         if (ImageFormats.isRaw(name)) {
             val extension = name.substringAfterLast('.', "raw").let { ".$it" }
