@@ -121,7 +121,7 @@ class MainActivity : AppCompatActivity() {
         findViewById<ChipGroup>(R.id.modeGroup).setOnCheckedStateChangeListener { _, ids ->
             mode = when (ids.firstOrNull()) { R.id.modeDecrypt -> "decrypt"; R.id.modeVerify -> "verify"; else -> "encrypt" }; refreshQueue()
         }
-        findViewById<MaterialButton>(R.id.pickBtn).setOnClickListener { pickFiles.launch(arrayOf("image/*")) }
+        findViewById<MaterialButton>(R.id.pickBtn).setOnClickListener { pickFiles.launch(arrayOf("image/*", "application/octet-stream")) }
         findViewById<MaterialButton>(R.id.pickFolderBtn).setOnClickListener { pickBatchFolder.launch(null) }
         findViewById<MaterialButton>(R.id.outputBtn).setOnClickListener { pickBatchOutput.launch(null) }
         findViewById<MaterialButton>(R.id.clearQueueBtn).setOnClickListener { queue.clear(); refreshQueue() }
@@ -351,7 +351,7 @@ class MainActivity : AppCompatActivity() {
         val files = DocumentFile.fromTreeUri(this, uri)?.listFiles()?.filter { it.isFile && isImageName(it.name) } ?: emptyList()
         if (files.isEmpty()) toast("No supported images in the selected folder") else { queue.addAll(files.map { it.uri }); refreshQueue(); toast("Added ${files.size} images") }
     }
-    private fun isImageName(name: String?) = name?.lowercase()?.let { it.endsWith(".png") || it.endsWith(".jpg") || it.endsWith(".jpeg") || it.endsWith(".webp") || it.endsWith(".bmp") } == true
+    private fun isImageName(name: String?) = ImageFormats.isSupported(name)
     private fun takePersistable(uri: Uri) { try { contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION) } catch (_: Exception) { } }
     private fun updateIterLabel() { iterLabel.text = "KDF cost: ${iterSlider.value.toInt()} iterations" }
     private fun actionLabel() = when (mode) { "encrypt" -> "Encrypt queued files"; "decrypt" -> "Decrypt queued files"; else -> "Verify queued files" }
@@ -413,18 +413,7 @@ class MainActivity : AppCompatActivity() {
             FolderWatcher.log(this, "Batch $mode finished: $succeeded/${batch.size} succeeded")
         }.start()
     }
-    private fun loadImage(uri: Uri): ImageData {
-        val bytes = contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: error("cannot read file")
-        if (bytes.size > 8 && bytes[0] == 137.toByte()) try { return decodePNG(bytes) } catch (_: Exception) { }
-        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
-        requireProcessableImage(bounds.outWidth, bounds.outHeight)
-        val bmp = BitmapFactory.decodeByteArray(bytes, 0, bytes.size) ?: error("unsupported image format")
-        val argb = IntArray(bmp.width * bmp.height); bmp.getPixels(argb, 0, bmp.width, 0, 0, bmp.width, bmp.height)
-        val opaque = argb.all { it ushr 24 == 0xff }; val channels = if (opaque) 3 else 4; val pixels = ByteArray(argb.size * channels)
-        for (n in argb.indices) { pixels[n * channels] = ((argb[n] ushr 16) and 255).toByte(); pixels[n * channels + 1] = ((argb[n] ushr 8) and 255).toByte(); pixels[n * channels + 2] = (argb[n] and 255).toByte(); if (!opaque) pixels[n * 4 + 3] = ((argb[n] ushr 24) and 255).toByte() }
-        return ImageData(pixels, bmp.width, bmp.height, channels)
-    }
+    private fun loadImage(uri: Uri): ImageData = ImageInput.decode(this, uri)
     private fun writeOutput(image: ImageData, name: String): File {
         val png = encodePNG(image.pixels, image.width, image.height, image.channels)
         if (manualOutputUri != null) {
