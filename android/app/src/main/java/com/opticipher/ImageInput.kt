@@ -22,17 +22,14 @@ object ImageInput {
         if (ImageFormats.isRaw(name)) {
             val descriptor = context.contentResolver.openFileDescriptor(uri, "r")
                 ?: error("cannot open RAW image")
-            descriptor.use { pfd ->
-                LibRaw().use { raw ->
-                    val status = raw.openFd(pfd.fd)
-                    if (status != 0) throw ErrnoException("LibRaw openFd", status)
-                    val bitmap = raw.decodeBitmap(BitmapFactory.Options().apply {
-                        inPreferredConfig = Bitmap.Config.ARGB_8888
-                    })
-                    return bitmapToImage(bitmap)
-                }
+            val fd = descriptor.detachFd()
+            descriptor.close()
+            LibRaw().use { raw ->
+                val bitmap = raw.decodeBitmap(fd, BitmapFactory.Options().apply {
+                    inPreferredConfig = Bitmap.Config.ARGB_8888
+                })
+                return bitmapToImage(bitmap)
             }
-        }
         val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
             ?: error("cannot read image")
         return decodeBytes(context, bytes, name)
