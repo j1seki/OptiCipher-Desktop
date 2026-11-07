@@ -1,8 +1,9 @@
 import { heic, avif } from 'icodec';
-import { FlashRaw, init as initFlashRaw } from 'flashraw';
+import { FlashRaw, init as initFlashRaw, simdSupported } from 'flashraw';
 import heicWasmUrl from 'icodec/heic-dec.wasm';
 import avifWasmUrl from 'icodec/avif-dec.wasm';
 import flashRawWasmUrl from 'flashraw/wasm/simd';
+import flashRawFallbackWasmUrl from 'flashraw/wasm/fallback';
 import { decodePNG } from './png.js';
 import { GOOGLE_PHOTOS_EXTENSIONS } from './image-format-list.js';
 export { GOOGLE_PHOTOS_EXTENSIONS } from './image-format-list.js';
@@ -55,7 +56,7 @@ async function decodeHeif(file, isAvif) {
 }
 
 async function decodeRaw(file) {
-  rawReady ??= initFlashRaw({ wasm: fetch(flashRawWasmUrl), threads: false });
+  rawReady ??= initFlashRaw({ wasm: fetch(simdSupported() ? flashRawWasmUrl : flashRawFallbackWasmUrl), threads: false });
   await rawReady;
   const raw = await FlashRaw.open(file);
   try {
