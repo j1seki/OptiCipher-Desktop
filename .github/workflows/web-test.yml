@@ -1,5 +1,7 @@
 name: web
 on:
+  push:
+    branches: [feat/google-photos-desktop-formats]
   pull_request:
   workflow_dispatch:
 
