@@ -86,7 +86,7 @@ object FolderWatcher {
     fun markExistingProcessed(ctx: Context, mode: String) {
         val tree = getInbox(ctx, mode)?.let { DocumentFile.fromTreeUri(ctx, it) } ?: return
         val processed = processed(ctx, mode)
-        tree.listFiles().filter { it.isFile && it.name?.lowercase()?.endsWith(".png") == true }
+        tree.listFiles().filter { it.isFile && ImageFormats.isSupported(it.name) }
             .forEach { processed.add(it.uri.toString()) }
         saveProcessed(ctx, mode, processed)
     }
