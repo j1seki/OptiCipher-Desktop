@@ -70,8 +70,14 @@ export async function loadImage(file) {
   const ext = (file.name.match(/\.[^.]+$/)?.[0] || '').toLowerCase();
   if (ext === '.png' || file.type === 'image/png') {
     const bytes = new Uint8Array(await file.arrayBuffer());
-    try { return { ...decodePNG(bytes), name: file.name };
-    catch (error) { throw new Error(`PNG could not be decoded losslessly: ${error.message}`); }
+    try {
+      return { ...decodePNG(bytes), name: file.name };
+    } catch (error) {
+      // Plain 16-bit/interlaced PNGs are valid sources outside the exact
+      // ciphertext codec. Valid OptiCipher ciphertexts use the exact path.
+      try { return await decodeNative(file); }
+      catch { throw new Error(`PNG could not be decoded: ${error.message}`); }
+    }
   }
   if (ext === '.heic' || ext === '.heif') return decodeHeif(file, false);
   if (ext === '.avif') return decodeHeif(file, true);
