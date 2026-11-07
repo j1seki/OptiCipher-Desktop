@@ -181,7 +181,7 @@ class WatchWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx,
                 if (mode == FolderWatcher.DECRYPT && !inputName.lowercase().endsWith(".png")) continue
                 eligible++
                 val bytes = applicationContext.contentResolver.openInputStream(source.uri)?.use { it.readBytes() } ?: continue
-                val image = try { decodeWatchImage(bytes) } catch (_: Exception) { continue }
+                val image = try { ImageInput.decodeBytes(applicationContext, bytes, inputName) } catch (error: Exception) { FolderWatcher.log(applicationContext, "Skipped $inputName: ${error.message}"); continue }
                 val encrypted = isOptiCipher(image)
                 // Encrypt only plaintext; decrypt only files that actually carry an OPTC header.
                 if ((mode == FolderWatcher.ENCRYPT && encrypted) || (mode == FolderWatcher.DECRYPT && !encrypted)) {
@@ -236,30 +236,4 @@ class WatchWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx,
             image.pixels[start + 2] == 0x54.toByte() && image.pixels[start + 3] == 0x43.toByte()
     } catch (_: Exception) { false }
 
-    private fun isEncryptableImageName(name: String): Boolean {
-        val lower = name.lowercase()
-        return lower.endsWith(".png") || lower.endsWith(".jpg") || lower.endsWith(".jpeg") ||
-            lower.endsWith(".webp") || lower.endsWith(".bmp")
-    }
-
-    /** Decode PNG losslessly when possible; decode other camera formats to RGBA/RGB for encryption. */
-    private fun decodeWatchImage(bytes: ByteArray): ImageData {
-        if (bytes.size > 8 && bytes[0] == 137.toByte()) try { return decodePNG(bytes) } catch (_: Exception) { }
-        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
-        requireProcessableImage(bounds.outWidth, bounds.outHeight)
-        val bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size) ?: error("unsupported image format")
-        val argb = IntArray(bitmap.width * bitmap.height)
-        bitmap.getPixels(argb, 0, bitmap.width, 0, 0, bitmap.width, bitmap.height)
-        val opaque = argb.all { it ushr 24 == 0xff }
-        val channels = if (opaque) 3 else 4
-        val pixels = ByteArray(argb.size * channels)
-        for (n in argb.indices) {
-            pixels[n * channels] = ((argb[n] ushr 16) and 255).toByte()
-            pixels[n * channels + 1] = ((argb[n] ushr 8) and 255).toByte()
-            pixels[n * channels + 2] = (argb[n] and 255).toByte()
-            if (!opaque) pixels[n * 4 + 3] = ((argb[n] ushr 24) and 255).toByte()
-        }
-        return ImageData(pixels, bitmap.width, bitmap.height, channels)
-    }
 }
