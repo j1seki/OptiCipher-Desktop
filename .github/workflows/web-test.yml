@@ -1,0 +1,24 @@
+name: web
+on:
+  push:
+    branches: [feat/google-photos-desktop-formats]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test-and-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install dependencies
+        working-directory: web
+        run: npm install
+      - name: Run web tests
+        working-directory: web
+        run: npm test
+      - name: Build static web app
+        working-directory: web
+        run: npm run build

@@ -35,7 +35,7 @@ import os
 from typing import Iterable, List, Optional
 
 from PySide6.QtCore import QSize, Qt, Signal
-from PySide6.QtGui import QColor, QIcon, QPainter, QPixmap
+from PySide6.QtGui import QColor, QIcon, QImage, QPainter, QPixmap
 from PySide6.QtWidgets import (
     QFileDialog,
     QFrame,
@@ -53,7 +53,16 @@ from PySide6.QtWidgets import (
 from . import icons
 from .imaging import ClickableLabel, human_size
 
-IMAGE_FILTER = "Images (*.png *.jpg *.jpeg *.bmp *.gif *.tif *.tiff)"
+# Keep the picker and folder importer aligned with the decoder capabilities.
+IMAGE_EXTENSIONS = (
+    ".png", ".jpg", ".jpeg", ".bmp", ".gif", ".tif", ".tiff",
+    ".webp", ".heic", ".heif", ".avif",
+    # rawpy/libraw supports many, but not every, camera RAW variant.
+    ".dng", ".cr2", ".cr3", ".crw", ".nef", ".nrw", ".arw", ".sr2", ".srf", ".orf", ".ori", ".rw2", ".rwl", ".raf",
+    ".pef", ".srw", ".3fr", ".fff", ".iiq", ".k25", ".kdc", ".dcr", ".dcs", ".erf",
+    ".mef", ".mos", ".mrw", ".obm", ".x3f", ".ari", ".gpr",
+)
+IMAGE_FILTER = "Images (" + " ".join("*" + ext for ext in IMAGE_EXTENSIONS) + ")"
 
 #: Colours used for the per-channel histogram (image-editor convention).
 CHANNEL_COLORS = {
@@ -694,7 +703,7 @@ class FileList(QWidget):
         found = [
             os.path.join(directory, name)
             for name in sorted(os.listdir(directory))
-            if name.lower().endswith((".png", ".jpg", ".jpeg", ".bmp", ".gif"))
+            if name.lower().endswith(IMAGE_EXTENSIONS)
         ]
         self.add_paths(found)
 
@@ -758,9 +767,21 @@ class PreviewBox(QFrame):
         """Show the image at `path`; returns False when it cannot be read."""
         pix = QPixmap(path)
         if pix.isNull():
-            self._label.setText("(cannot load preview)")
-            self.enlarge_btn.setEnabled(False)
-            return False
+            # Qt image plugins do not consistently decode HEIC, AVIF or RAW.
+            # Use the same optional decoder stack as the encryption pipeline.
+            try:
+                import numpy as np
+                from opticipher.io_image import load_image
+
+                pixels = np.ascontiguousarray(load_image(path))
+                height, width, channels = pixels.shape
+                image_format = QImage.Format_RGB888 if channels == 3 else QImage.Format_RGBA8888
+                image = QImage(pixels.data, width, height, width * channels, image_format).copy()
+                pix = QPixmap.fromImage(image)
+            except Exception:
+                self._label.setText("(cannot load preview)")
+                self.enlarge_btn.setEnabled(False)
+                return False
         self._pixmap = pix
         self._path = path
         self._label.setText("")

@@ -1,5 +1,6 @@
 import { encryptImage, decryptImage, verifyImage, entropyReport, adjacentCorrelation, npcr, uaci, histogram } from './core.js';
-import { encodePNG, decodePNG } from './png.js';
+import { encodePNG } from './png.js';
+import { loadImage } from './image-formats.js';
 
 const $ = id => document.getElementById(id);
 const yieldToUI = () => new Promise(r => setTimeout(r, 0));
@@ -23,29 +24,6 @@ const getEncryptFiles = wireDrop('drop-encrypt', 'files-encrypt');
 const getDecryptFiles = wireDrop('drop-decrypt', 'files-decrypt');
 const getVerifyFiles = wireDrop('drop-verify', 'files-verify');
 const getAnalyzeFiles = wireDrop('drop-analyze', 'files-analyze');
-
-async function loadImage(file) {
-  const buf = new Uint8Array(await file.arrayBuffer());
-  if (file.type === 'image/png' || file.name.toLowerCase().endsWith('.png')) {
-    try { return { ...decodePNG(buf), name: file.name }; } catch (e) { /* fall through to canvas */ }
-  }
-  // Canvas fallback for JPEG/WebP/interlaced etc. (note: premultiplies alpha —
-  // fine for opaque photos; exact PNG path above is used when possible).
-  const blob = new Blob([buf], { type: file.type || 'image/png' });
-  const bmp = await createImageBitmap(blob);
-  const c = document.createElement('canvas'); c.width = bmp.width; c.height = bmp.height;
-  const ctx = c.getContext('2d', { willReadFrequently: true });
-  ctx.drawImage(bmp, 0, 0);
-  const d = ctx.getImageData(0, 0, bmp.width, bmp.height);
-  // Canvas is RGBA; if every alpha is 255, drop to RGB like Pillow-on-opaque.
-  let opaque = true; for (let i = 3; i < d.data.length; i += 4) if (d.data[i] !== 255) { opaque = false; break; }
-  if (opaque) {
-    const px = new Uint8Array(bmp.width * bmp.height * 3);
-    for (let i = 0, j = 0; i < d.data.length; i += 4, j += 3) { px[j] = d.data[i]; px[j + 1] = d.data[i + 1]; px[j + 2] = d.data[i + 2]; }
-    return { pixels: px, width: bmp.width, height: bmp.height, channels: 3, name: file.name };
-  }
-  return { pixels: new Uint8Array(d.data.buffer, d.data.byteOffset, d.data.byteLength), width: bmp.width, height: bmp.height, channels: 4, name: file.name };
-}
 
 function download(name, pngBytes) {
   const url = URL.createObjectURL(new Blob([pngBytes], { type: 'image/png' }));

@@ -58,6 +58,15 @@ app = [
     "PySide6>=6.6",
     "wgpu>=0.25",
     "paramiko>=3.0",  # sftp:// output locations (app/sftp.py)
+    "pillow-heif>=0.16",  # HEIC / HEIF decoding
+    "pillow-avif-plugin>=1.4",  # AVIF decoding
+    "rawpy>=0.24",  # camera RAW decoding through LibRaw
+]
+# Install with: pip install -e ".[formats]" for the optional image decoders.
+formats = [
+    "pillow-heif>=0.16",
+    "pillow-avif-plugin>=1.4",
+    "rawpy>=0.24",
 ]
 
 [project.urls]

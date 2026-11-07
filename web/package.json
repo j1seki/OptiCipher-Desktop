@@ -4,8 +4,14 @@
   "type": "module",
   "scripts": {
     "build": "node build.mjs",
-    "test": "node --test tests/parity.test.js"
+    "test": "node --test tests/*.test.js"
   },
-  "dependencies": { "pako": "^2.1.0" },
-  "devDependencies": { "esbuild": "^0.24.0" }
+  "dependencies": {
+    "pako": "^3.0.3",
+    "icodec": "^0.6.0",
+    "flashraw": "^0.1.0"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.2"
+  }
 }

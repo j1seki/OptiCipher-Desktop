@@ -11,6 +11,8 @@ await build({
   minify: true,
   outfile: 'dist/assets/app.js',
   target: ['es2020'],
+  loader: { '.wasm': 'file' },
+  assetNames: 'assets/[name]-[hash]',
 });
 cpSync('index.html', 'dist/index.html');
 cpSync('style.css', 'dist/style.css');
