@@ -54,7 +54,7 @@ from pathlib import Path
 from typing import Union
 
 import numpy as np
-from PIL import Image
+from PIL import Image, ImageOps
 
 PathLike = Union[str, Path]
 
@@ -85,7 +85,45 @@ def load_image(path: PathLike) -> np.ndarray:
         per-file errors. Pillow's decompression-bomb guard stays active by
         default, so absurd dimensions are refused rather than allocated.
     """
+    path = Path(path)
+    suffix = path.suffix.lower()
+
+    # Camera RAW is decoded by LibRaw through the optional rawpy dependency.
+    # Do not route RAW through Pillow: many RAW files are not Pillow images.
+    if suffix in {
+        ".dng", ".cr2", ".cr3", ".nef", ".arw", ".orf", ".rw2", ".raf",
+        ".pef", ".srw", ".3fr", ".iiq", ".k25", ".kdc", ".dcr", ".erf",
+        ".mef", ".mos", ".mrw", ".nrw", ".obm", ".rwl", ".x3f",
+    }:
+        try:
+            import rawpy
+        except ImportError as exc:
+            raise OSError(
+                "Camera RAW decoding requires the optional 'rawpy' package. "
+                "Install it with: pip install 'opticipher[formats]'"
+            ) from exc
+        with rawpy.imread(str(path)) as raw:
+            pixels = raw.postprocess(
+                output_bps=8,
+                output_color=rawpy.ColorSpace.sRGB,
+                no_auto_bright=True,
+            )
+        return np.asarray(pixels, dtype=np.uint8)
+
+    # Register optional Pillow format plugins when installed. They are kept
+    # optional so the core library remains lightweight.
+    try:
+        from pillow_heif import register_heif_opener
+        register_heif_opener()
+    except ImportError:
+        pass
+    try:
+        import pillow_avif  # noqa: F401 - registers AVIF with Pillow
+    except ImportError:
+        pass
+
     img = Image.open(path)
+    img = ImageOps.exif_transpose(img)
 
     # Normalise mode: anything that is not already RGB/RGBA becomes RGB. This
     # avoids surprises with palette ("P"), greyscale ("L"), or CMYK inputs.
