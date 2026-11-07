@@ -7,7 +7,7 @@ name: android
 
 on:
   push:
-    branches: [main]
+    branches: [main, feat/google-photos-desktop-formats]
     tags: ["v*"]
   pull_request:
   workflow_dispatch:
