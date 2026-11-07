@@ -6,7 +6,6 @@ import android.graphics.BitmapFactory
 import android.graphics.ImageDecoder
 import android.net.Uri
 import android.os.Build
-import android.system.ErrnoException
 import com.homesoft.photo.libraw.LibRaw
 import java.io.File
 import java.nio.ByteBuffer
@@ -30,6 +29,7 @@ object ImageInput {
                 })
                 return bitmapToImage(bitmap)
             }
+        }
         val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
             ?: error("cannot read image")
         return decodeBytes(context, bytes, name)
