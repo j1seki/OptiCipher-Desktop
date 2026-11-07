@@ -53,7 +53,16 @@ from PySide6.QtWidgets import (
 from . import icons
 from .imaging import ClickableLabel, human_size
 
-IMAGE_FILTER = "Images (*.png *.jpg *.jpeg *.bmp *.gif *.tif *.tiff)"
+# Keep the picker and folder importer aligned with the decoder capabilities.
+IMAGE_EXTENSIONS = (
+    ".png", ".jpg", ".jpeg", ".bmp", ".gif", ".tif", ".tiff",
+    ".webp", ".heic", ".heif", ".avif",
+    # rawpy/libraw supports many, but not every, camera RAW variant.
+    ".dng", ".cr2", ".cr3", ".nef", ".arw", ".orf", ".rw2", ".raf",
+    ".pef", ".srw", ".3fr", ".iiq", ".k25", ".kdc", ".dcr", ".erf",
+    ".mef", ".mos", ".mrw", ".nrw", ".obm", ".rwl", ".x3f",
+)
+IMAGE_FILTER = "Images (" + " ".join("*" + ext for ext in IMAGE_EXTENSIONS) + ")"
 
 #: Colours used for the per-channel histogram (image-editor convention).
 CHANNEL_COLORS = {
@@ -694,7 +703,7 @@ class FileList(QWidget):
         found = [
             os.path.join(directory, name)
             for name in sorted(os.listdir(directory))
-            if name.lower().endswith((".png", ".jpg", ".jpeg", ".bmp", ".gif"))
+            if name.lower().endswith(IMAGE_EXTENSIONS)
         ]
         self.add_paths(found)
 
