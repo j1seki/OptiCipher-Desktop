@@ -53,12 +53,14 @@ async function decodeHeif(file, isAvif) {
   await ready;
   const decoded = codec.decode(new Uint8Array(await file.arrayBuffer()));
   let pixels;
-  if (decoded.data.BYTES_PER_ELEMENT === 2) {
-    // icodec returns high-bit-depth RGBA as little-endian 16-bit channels.
-    // OptiCipher's pixel pipeline is 8-bit, so scale full-range 16-bit samples.
+  const depth = decoded.depth ?? 8;
+  if (depth > 8) {
+    // icodec exposes high-depth RGBA as little-endian 16-bit channel bytes,
+    // with the source bit depth on the ImageDataLike object.
     const words = new Uint16Array(decoded.data.buffer, decoded.data.byteOffset, decoded.data.byteLength / 2);
+    const maximum = (2 ** depth) - 1;
     pixels = new Uint8Array(words.length);
-    for (let i = 0; i < words.length; i++) pixels[i] = Math.round(words[i] / 257);
+    for (let i = 0; i < words.length; i++) pixels[i] = Math.round(words[i] * 255 / maximum);
   } else {
     pixels = new Uint8Array(decoded.data.buffer, decoded.data.byteOffset, decoded.data.byteLength);
   }
