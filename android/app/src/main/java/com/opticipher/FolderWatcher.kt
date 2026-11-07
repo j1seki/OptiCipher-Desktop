@@ -177,7 +177,7 @@ class WatchWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx,
                 // Ciphertext is always PNG. Encrypt, however, accepts the same
                 // common camera/image formats as the manual batch screen.
                 val inputName = source.name ?: continue
-                if (mode == FolderWatcher.ENCRYPT && !isEncryptableImageName(inputName)) continue
+                if (mode == FolderWatcher.ENCRYPT && !ImageFormats.isSupported(inputName)) continue
                 if (mode == FolderWatcher.DECRYPT && !inputName.lowercase().endsWith(".png")) continue
                 eligible++
                 val bytes = applicationContext.contentResolver.openInputStream(source.uri)?.use { it.readBytes() } ?: continue
