@@ -251,8 +251,21 @@ fun unscramblePixels(pixels: ByteArray, width: Int, height: Int, channels: Int, 
 
 data class ImageData(val pixels: ByteArray, val width: Int, val height: Int, val channels: Int)
 
+// The encryption pipeline needs several full-size buffers (decoded bitmap,
+// scrambled pixels, ciphertext, PNG scanlines and compressed output). A 4 MP
+// cap keeps that peak safely below the 256 MB heap on typical Android phones.
+const val MAX_PROCESS_PIXELS = 4_000_000
+fun requireProcessableImage(width: Int, height: Int) {
+    require(width > 0 && height > 0) { "invalid image dimensions" }
+    val pixels = width.toLong() * height.toLong()
+    require(pixels <= MAX_PROCESS_PIXELS) {
+        "image is ${pixels / 1_000_000.0} MP; this phone can safely process images up to 4 MP. Resize it first to avoid running out of memory."
+    }
+}
+
 fun encryptImage(img: ImageData, passphrase: String, iterations: Int = DEFAULT_ITERATIONS): ImageData {
     require(img.channels == 3 || img.channels == 4)
+    requireProcessableImage(img.width, img.height)
     val salt = ByteArray(SALT_LENGTH).also { SecureRandom().nextBytes(it) }
     val derived = deriveKeys(passphrase, salt, iterations)
     val scrambled = scramblePixels(img.pixels, img.width, img.height, img.channels, derived.scrambleSeed)

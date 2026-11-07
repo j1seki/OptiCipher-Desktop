@@ -9,6 +9,7 @@ import android.graphics.BitmapFactory
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.Environment
 import android.provider.Settings
 import android.view.View
 import android.widget.ImageView
@@ -29,6 +30,7 @@ import com.google.android.material.button.MaterialButton
 import com.google.android.material.checkbox.MaterialCheckBox
 import com.google.android.material.chip.ChipGroup
 import com.google.android.material.slider.Slider
+import com.google.android.material.tabs.TabLayout
 import com.google.android.material.textfield.TextInputEditText
 import java.io.File
 
@@ -38,6 +40,10 @@ class MainActivity : AppCompatActivity() {
     private var mode = "encrypt"
     private var pendingFolderMode: String? = null
     private var pendingOutputMode: String? = null
+    // First-run setup requests a scoped SAF folder grant. Android deliberately
+    // does not provide a broad runtime "all folders" permission; the picker is
+    // the operating system's folder-permission prompt.
+    private var onboardingStep: OnboardingStep? = null
     private lateinit var passInput: TextInputEditText
     private lateinit var iterSlider: Slider
     private lateinit var iterLabel: TextView
@@ -46,6 +52,9 @@ class MainActivity : AppCompatActivity() {
     private lateinit var results: LinearLayout
     private lateinit var preview: ImageView
     private lateinit var manualOutView: TextView
+    private lateinit var batchStatus: TextView
+    private lateinit var batchDetail: TextView
+    private lateinit var batchProgress: com.google.android.material.progressindicator.LinearProgressIndicator
 
     private val pickFiles = registerForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
         if (uris.isEmpty()) toast("No images selected") else { queue.addAll(uris); refreshQueue() }
@@ -65,6 +74,12 @@ class MainActivity : AppCompatActivity() {
         if (uri != null) {
             takePersistable(uri); FolderWatcher.setInbox(this, watchMode, uri)
             refreshWatch(watchMode); toast("Folder access granted for auto-$watchMode")
+            if (onboardingStep == OnboardingStep.ENCRYPT_INPUT) {
+                onboardingStep = OnboardingStep.ENCRYPT_OUTPUT
+                pendingOutputMode = FolderWatcher.ENCRYPT
+                toast("Choose where encrypted images should be saved")
+                pickWatchOutput.launch(null)
+            }
         }
         pendingFolderMode = null
     }
@@ -73,9 +88,21 @@ class MainActivity : AppCompatActivity() {
         if (uri != null) {
             takePersistable(uri); FolderWatcher.setOutputTree(this, watchMode, uri)
             refreshWatch(watchMode); toast("Auto-$watchMode output folder chosen")
+            if (onboardingStep == OnboardingStep.ENCRYPT_OUTPUT) completeFolderSetup()
         }
         pendingOutputMode = null
     }
+    private val requestNotifications = registerForActivityResult(ActivityResultContracts.RequestPermission()) {
+        requestImagePermissionOrStorageAccess()
+    }
+    private val requestImages = registerForActivityResult(ActivityResultContracts.RequestPermission()) {
+        requestAllFilesAccessOrFolderSetup()
+    }
+    private val requestAllFilesAccess = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+        beginFolderSetup()
+    }
+
+    private enum class OnboardingStep { ENCRYPT_INPUT, ENCRYPT_OUTPUT }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -87,6 +114,7 @@ class MainActivity : AppCompatActivity() {
         passInput = findViewById(R.id.pass); iterSlider = findViewById(R.id.iter); iterLabel = findViewById(R.id.iterLabel)
         queueView = findViewById(R.id.queueView); startBtn = findViewById(R.id.startBtn)
         results = findViewById(R.id.results); preview = findViewById(R.id.preview); manualOutView = findViewById(R.id.manualOutView)
+        batchStatus = findViewById(R.id.batchStatus); batchDetail = findViewById(R.id.batchDetail); batchProgress = findViewById(R.id.batchProgress)
         manualOutputUri = getSharedPreferences("manual", Context.MODE_PRIVATE).getString("output_uri", null)?.let(Uri::parse)
         iterSlider.value = 200000f; updateIterLabel(); iterSlider.addOnChangeListener { _, _, _ -> updateIterLabel() }
 
@@ -98,24 +126,47 @@ class MainActivity : AppCompatActivity() {
         findViewById<MaterialButton>(R.id.outputBtn).setOnClickListener { pickBatchOutput.launch(null) }
         findViewById<MaterialButton>(R.id.clearQueueBtn).setOnClickListener { queue.clear(); refreshQueue() }
         startBtn.setOnClickListener { startBatch() }
+        findViewById<MaterialButton>(R.id.batchCheckBtn).setOnClickListener { runBatchCheck() }
         setupWatch(FolderWatcher.ENCRYPT)
         setupWatch(FolderWatcher.DECRYPT)
-        findViewById<MaterialButton>(R.id.permBtn).setOnClickListener { showPermissionsDialog() }
+        setupTabs()
+        findViewById<MaterialButton>(R.id.permissionsBtn).setOnClickListener { showPermissionsDialog() }
+        findViewById<MaterialButton>(R.id.refreshLogBtn).setOnClickListener { refreshActivity() }
+        findViewById<MaterialButton>(R.id.clearLogBtn).setOnClickListener { FolderWatcher.clearActivityLog(this); refreshActivity() }
         refreshQueue(); refreshOutputs(); refreshWatch(FolderWatcher.ENCRYPT); refreshWatch(FolderWatcher.DECRYPT)
+        refreshActivity()
         handleShareIntent(intent)
+        showFirstRunSetupIfNeeded()
+    }
+
+    private fun setupTabs() {
+        val pages = listOf(findViewById<View>(R.id.batchPage), findViewById(R.id.encryptPage), findViewById(R.id.decryptPage), findViewById(R.id.activityPage))
+        findViewById<TabLayout>(R.id.mainTabs).addOnTabSelectedListener(object : TabLayout.OnTabSelectedListener {
+            override fun onTabSelected(tab: TabLayout.Tab) { pages.forEachIndexed { index, page -> page.visibility = if (index == tab.position) View.VISIBLE else View.GONE }; if (tab.position == 3) refreshActivity() }
+            override fun onTabUnselected(tab: TabLayout.Tab) = Unit
+            override fun onTabReselected(tab: TabLayout.Tab) { if (tab.position == 3) refreshActivity() }
+        })
+    }
+
+    private fun refreshActivity() {
+        val encrypt = if (FolderWatcher.isWatching(this, FolderWatcher.ENCRYPT)) "● Auto-encrypt: ON" else "○ Auto-encrypt: OFF"
+        val decrypt = if (FolderWatcher.isWatching(this, FolderWatcher.DECRYPT)) "● Auto-decrypt: ON" else "○ Auto-decrypt: OFF"
+        findViewById<TextView>(R.id.backgroundStatus).text = "$encrypt\n$decrypt\n\nBackground scans run through Android WorkManager. Recent events:"
+        val lines = FolderWatcher.activityLog(this)
+        findViewById<TextView>(R.id.activityLog).text = if (lines.isEmpty()) "No activity recorded yet." else lines.joinToString("\n")
     }
 
     private data class WatchIds(val pass: Int, val remember: Int, val folderText: Int, val folderButton: Int, val outputButton: Int,
         val existing: Int, val conflict: Int, val skip: Int, val overwrite: Int, val interval: Int, val immediate: Int, val fifteen: Int,
-        val hour: Int, val status: Int, val start: Int, val stop: Int)
+        val hour: Int, val status: Int, val start: Int, val stop: Int, val check: Int, val checkStatus: Int)
     private fun ids(watchMode: String) = if (watchMode == FolderWatcher.ENCRYPT) WatchIds(
         R.id.encryptWatchPass, R.id.encryptWatchRemember, R.id.encryptWatchFolders, R.id.encryptWatchFolderBtn, R.id.encryptWatchOutputBtn,
         R.id.encryptExisting, R.id.encryptConflictGroup, R.id.encryptSkip, R.id.encryptOverwrite, R.id.encryptIntervalGroup, R.id.encryptImmediate,
-        R.id.encrypt15, R.id.encrypt60, R.id.encryptWatchStatus, R.id.encryptWatchStart, R.id.encryptWatchStop
+        R.id.encrypt15, R.id.encrypt60, R.id.encryptWatchStatus, R.id.encryptWatchStart, R.id.encryptWatchStop, R.id.encryptCheckBtn, R.id.encryptCheckStatus
     ) else WatchIds(
         R.id.decryptWatchPass, R.id.decryptWatchRemember, R.id.decryptWatchFolders, R.id.decryptWatchFolderBtn, R.id.decryptWatchOutputBtn,
         R.id.decryptExisting, R.id.decryptConflictGroup, R.id.decryptSkip, R.id.decryptOverwrite, R.id.decryptIntervalGroup, R.id.decryptImmediate,
-        R.id.decrypt15, R.id.decrypt60, R.id.decryptWatchStatus, R.id.decryptWatchStart, R.id.decryptWatchStop
+        R.id.decrypt15, R.id.decrypt60, R.id.decryptWatchStatus, R.id.decryptWatchStart, R.id.decryptWatchStop, R.id.decryptCheckBtn, R.id.decryptCheckStatus
     )
 
     private fun setupWatch(watchMode: String) {
@@ -157,6 +208,75 @@ class MainActivity : AppCompatActivity() {
             toast("Auto-$watchMode is on")
         }
         findViewById<MaterialButton>(i.stop).setOnClickListener { FolderWatcher.stopWatching(this, watchMode); refreshWatch(watchMode); toast("Auto-$watchMode is off") }
+        findViewById<MaterialButton>(i.check).setOnClickListener { runWatchCheck(watchMode) }
+    }
+
+    /** First-launch flow: runtime media, special all-files and scoped folder grants. */
+    private fun showFirstRunSetupIfNeeded() {
+        val settings = getSharedPreferences("onboarding", Context.MODE_PRIVATE)
+        if (settings.getBoolean("initial_folder_setup_done", false)) return
+        AlertDialog.Builder(this)
+            .setTitle("Set up OptiCipher folder access")
+            .setMessage(
+                "OptiCipher will request the permissions needed for local image and folder processing:\n\n" +
+                    "• Photos and videos — lets you add images directly.\n" +
+                    "• All files access — lets OptiCipher access device folders when you allow it in Android Settings.\n" +
+                    "• Selected-folder access — Android will then ask you to choose the auto-encrypt input and output folders.\n" +
+                    "• Notifications — lets folder-watch report results.\n\n" +
+                    "Nothing is uploaded or sent from this device."
+            )
+            .setPositiveButton("Grant folder access") { _, _ ->
+                if (Build.VERSION.SDK_INT >= 33 && ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+                    requestNotifications.launch(Manifest.permission.POST_NOTIFICATIONS)
+                } else requestImagePermissionOrStorageAccess()
+            }
+            .setNegativeButton("Not now", null)
+            .setCancelable(false)
+            .show()
+    }
+
+    private fun requestImagePermissionOrStorageAccess() {
+        when {
+            Build.VERSION.SDK_INT >= 33 && ContextCompat.checkSelfPermission(this, Manifest.permission.READ_MEDIA_IMAGES) != PackageManager.PERMISSION_GRANTED ->
+                requestImages.launch(Manifest.permission.READ_MEDIA_IMAGES)
+            Build.VERSION.SDK_INT < 33 && ContextCompat.checkSelfPermission(this, Manifest.permission.READ_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED ->
+                requestImages.launch(Manifest.permission.READ_EXTERNAL_STORAGE)
+            else -> requestAllFilesAccessOrFolderSetup()
+        }
+    }
+
+    private fun requestAllFilesAccessOrFolderSetup() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && !Environment.isExternalStorageManager()) {
+            AlertDialog.Builder(this)
+                .setTitle("Allow all files access")
+                .setMessage("Android will open the OptiCipher storage-access setting. Turn on ‘Allow access to manage all files’, then return here. This complements the specific folder access you choose next.")
+                .setPositiveButton("Open storage settings") { _, _ ->
+                    try {
+                        requestAllFilesAccess.launch(Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION, Uri.parse("package:$packageName")))
+                    } catch (_: Exception) { requestAllFilesAccess.launch(Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION)) }
+                }
+                .setNegativeButton("Use selected folders only") { _, _ -> beginFolderSetup() }
+                .setCancelable(false)
+                .show()
+        } else beginFolderSetup()
+    }
+
+    private fun beginFolderSetup() {
+        onboardingStep = OnboardingStep.ENCRYPT_INPUT
+        pendingFolderMode = FolderWatcher.ENCRYPT
+        toast("Choose the folder whose images you want to auto-encrypt")
+        pickWatchFolder.launch(null)
+    }
+
+    private fun completeFolderSetup() {
+        onboardingStep = null
+        getSharedPreferences("onboarding", Context.MODE_PRIVATE).edit().putBoolean("initial_folder_setup_done", true).apply()
+        AlertDialog.Builder(this)
+            .setTitle("Folder access granted")
+            .setMessage("OptiCipher can now access the two folders you selected. Enter a passphrase and tap ‘Turn on auto-encrypt’ when ready.\n\nTo use auto-decrypt, select its input and output folders in the Auto-decrypt section. You can change any folder later.")
+            .setPositiveButton("Battery settings") { _, _ -> openBatterySettings() }
+            .setNegativeButton("Done", null)
+            .show()
     }
 
     private fun refreshWatch(watchMode: String) {
@@ -164,6 +284,59 @@ class MainActivity : AppCompatActivity() {
         findViewById<TextView>(i.folderText).text = "Input: ${inbox ?: "not selected"}\nOutput: ${out ?: "app storage"}"
         val every = when (FolderWatcher.getIntervalMinutes(this, watchMode)) { 0 -> "immediately"; 60 -> "every hour"; else -> "every 15 minutes" }
         findViewById<TextView>(i.status).text = if (FolderWatcher.isWatching(this, watchMode)) "● Auto-$watchMode is on — checks $every" else "○ Auto-$watchMode is off"
+    }
+
+    private fun readyStatus(viewId: Int, passed: Boolean, details: String) {
+        val status = findViewById<TextView>(viewId)
+        status.text = if (passed) "🟢 READY — all tests passed\n$details" else "🔴 NOT READY — fix the items below\n$details"
+        val heading = if (passed) "READY" else "NOT READY"
+        FolderWatcher.log(this, "$heading: ${details.replace("\n", " · ")}")
+    }
+
+    /** Fast no-file test for the manual flow: crypto roundtrip plus output-folder access. */
+    private fun runBatchCheck() {
+        val status = findViewById<TextView>(R.id.batchCheckStatus); status.text = "Testing batch setup…"
+        Thread {
+            val findings = mutableListOf<String>()
+            var ok = true
+            try {
+                val tiny = ImageData(byteArrayOf(10, 20, 30), 1, 1, 3)
+                val roundtrip = decryptImage(encryptImage(tiny, "OptiCipher-self-test", 10_000), "OptiCipher-self-test")
+                if (!roundtrip.pixels.contentEquals(tiny.pixels)) error("crypto round-trip did not match")
+                findings += "✓ encryption test passed"
+            } catch (e: Exception) { ok = false; findings += "✗ encryption test: ${e.message}" }
+            if (manualOutputUri != null) {
+                val tree = DocumentFile.fromTreeUri(this, manualOutputUri!!)
+                if (tree?.canWrite() == true) findings += "✓ batch output folder writable" else { ok = false; findings += "✗ batch output folder is not writable" }
+            } else findings += "✓ app storage output available"
+            runOnUiThread { readyStatus(R.id.batchCheckStatus, ok, findings.joinToString("\n")) }
+        }.start()
+    }
+
+    /** Verifies every prerequisite for background work without modifying user images. */
+    private fun runWatchCheck(watchMode: String) {
+        val i = ids(watchMode); findViewById<TextView>(i.checkStatus).text = "Testing auto-$watchMode setup…"
+        Thread {
+            val findings = mutableListOf<String>(); var ok = true
+            fun requireCheck(condition: Boolean, pass: String, fail: String) { if (condition) findings += "✓ $pass" else { ok = false; findings += "✗ $fail" } }
+            val imagesGranted = if (Build.VERSION.SDK_INT >= 33) ContextCompat.checkSelfPermission(this, Manifest.permission.READ_MEDIA_IMAGES) == PackageManager.PERMISSION_GRANTED else ContextCompat.checkSelfPermission(this, Manifest.permission.READ_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED
+            requireCheck(imagesGranted, "photo/media permission granted", "photo/media permission missing")
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) requireCheck(Environment.isExternalStorageManager(), "all-files access granted", "all-files access missing")
+            val input = FolderWatcher.getInbox(this, watchMode)?.let { DocumentFile.fromTreeUri(this, it) }
+            requireCheck(input != null && input.canRead(), "input folder readable", "select an accessible input folder")
+            val output = FolderWatcher.getOutputTree(this, watchMode)?.let { DocumentFile.fromTreeUri(this, it) }
+            requireCheck(output != null && output.canWrite(), "output folder writable", "select a writable output folder")
+            requireCheck(FolderWatcher.restorePassphraseIfEnabled(this, watchMode)?.isNotEmpty() == true, "background passphrase stored securely", "enter passphrase and enable Remember")
+            try {
+                val tiny = ImageData(byteArrayOf(10, 20, 30), 1, 1, 3)
+                val restored = decryptImage(encryptImage(tiny, "OptiCipher-self-test", 10_000), "OptiCipher-self-test")
+                requireCheck(restored.pixels.contentEquals(tiny.pixels), "crypto round-trip passed", "crypto result mismatch")
+            } catch (e: Exception) { ok = false; findings += "✗ crypto self-test: ${e.message}" }
+            val heapMb = Runtime.getRuntime().maxMemory() / (1024 * 1024)
+            findings += "✓ device processing heap: ${heapMb} MB"
+            findings += "Large photos may exceed this device’s memory limit; the app will identify them in Activity."
+            runOnUiThread { readyStatus(i.checkStatus, ok, findings.joinToString("\n")) }
+        }.start()
     }
 
     override fun onNewIntent(intent: Intent) { super.onNewIntent(intent); handleShareIntent(intent) }
@@ -191,9 +364,11 @@ class MainActivity : AppCompatActivity() {
     private fun showPermissionsDialog() {
         val batteryOk = getSystemService(android.os.PowerManager::class.java)?.isIgnoringBatteryOptimizations(packageName) != false
         val notification = if (Build.VERSION.SDK_INT >= 33) if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED) "granted ✓" else "not granted ✗" else "not required"
+        val media = if (Build.VERSION.SDK_INT >= 33) if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_MEDIA_IMAGES) == PackageManager.PERMISSION_GRANTED) "granted ✓" else "not granted ✗" else if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED) "granted ✓" else "not granted ✗"
+        val allFiles = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) if (Environment.isExternalStorageManager()) "granted ✓" else "not granted ✗" else "not required"
         AlertDialog.Builder(this).setTitle("Folder access, notifications & battery")
-            .setMessage("Folder access is granted per folder through Android’s system folder picker. Choose the input and output folders in each auto-encrypt / auto-decrypt card; the app retains only those folder grants, not full device storage.\n\nNotifications: $notification\nBattery optimisation exemption: ${if (batteryOk) "granted ✓" else "not granted ✗"}")
-            .setPositiveButton("Grant encrypt-folder access") { _, _ -> pendingFolderMode = FolderWatcher.ENCRYPT; pickWatchFolder.launch(null) }
+            .setMessage("Photos/media: $media\nAll files access: $allFiles\nNotifications: $notification\nBattery optimisation exemption: ${if (batteryOk) "granted ✓" else "not granted ✗"}\n\nFolder access can also be granted per folder through Android’s system picker. Choose each watch card’s input and output folders to preserve focused, persistent access.")
+            .setPositiveButton("Request all access") { _, _ -> requestImagePermissionOrStorageAccess() }
             .setNeutralButton("Notifications") { _, _ -> if (Build.VERSION.SDK_INT >= 33) ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.POST_NOTIFICATIONS), 1) }
             .setNegativeButton("Battery settings") { _, _ -> openBatterySettings() }.show()
     }
@@ -207,22 +382,43 @@ class MainActivity : AppCompatActivity() {
         if (queue.isEmpty()) return
         val pass = passInput.text.toString(); if (mode != "verify" && pass.isEmpty()) { toast("Enter a passphrase first"); return }
         val batch = queue.toList(); queue.clear(); refreshQueue(); startBtn.isEnabled = false; startBtn.text = "Working…"
+        batchProgress.visibility = View.VISIBLE; batchProgress.max = batch.size; batchProgress.progress = 0
+        batchDetail.visibility = View.VISIBLE; batchStatus.text = "${actionLabel().removeSuffix(" queued files")} started — 0 of ${batch.size}"; FolderWatcher.log(this, "Batch ${mode} started: ${batch.size} file(s)")
         Thread {
-            for (uri in batch) try {
-                val image = loadImage(uri)
-                if (mode == "verify") { showResult(uri.lastPathSegment ?: "file", verifyImage(image, pass.ifEmpty { null }).let { "[${it.status}] ${it.message}" }, null); continue }
-                val result = if (mode == "encrypt") encryptImage(image, pass, iterSlider.value.toInt()) else decryptImage(image, pass)
-                val inputStem = (uri.lastPathSegment ?: "image").substringBeforeLast('.')
-                val stem = if (mode == "decrypt" && inputStem.endsWith("_encrypted")) inputStem.removeSuffix("_encrypted") else inputStem
-                val name = if (mode == "encrypt") "${stem}_encrypted.png" else "$stem.png"
-                val output = writeOutput(result, name); showBitmap(result); showResult(uri.lastPathSegment ?: "file", "→ ${output.name}", output)
-            } catch (error: Exception) { showResult(uri.lastPathSegment ?: "file", "ERROR: ${error.message}", null) }
-            runOnUiThread { refreshQueue() }
+            var completed = 0; var succeeded = 0
+            for (uri in batch) {
+                var ok = false
+                try {
+                    val index = completed + 1
+                    runOnUiThread { batchStatus.text = "${actionLabel().removeSuffix(" queued files")} — $index of ${batch.size}"; batchDetail.text = "Current: ${uri.lastPathSegment}" }
+                    val image = loadImage(uri)
+                    if (mode == "verify") {
+                        showResult(uri.lastPathSegment ?: "file", verifyImage(image, pass.ifEmpty { null }).let { "[${it.status}] ${it.message}" }, null)
+                    } else {
+                        val result = if (mode == "encrypt") encryptImage(image, pass, iterSlider.value.toInt()) else decryptImage(image, pass)
+                        val inputStem = (uri.lastPathSegment ?: "image").substringBeforeLast('.')
+                        val stem = if (mode == "decrypt" && inputStem.endsWith("_encrypted")) inputStem.removeSuffix("_encrypted") else inputStem
+                        val name = if (mode == "encrypt") "${stem}_encrypted.png" else "$stem.png"
+                        val output = writeOutput(result, name); showBitmap(result); showResult(uri.lastPathSegment ?: "file", "→ ${output.name}", output)
+                    }
+                    succeeded++; ok = true
+                } catch (error: Exception) {
+                    showResult(uri.lastPathSegment ?: "file", "ERROR: ${error.message}", null)
+                } finally {
+                    completed++; runOnUiThread { batchProgress.progress = completed }
+                }
+                FolderWatcher.log(this, "Batch ${mode}: ${uri.lastPathSegment} ${if (ok) "completed" else "failed"}")
+            }
+            runOnUiThread { refreshQueue(); batchStatus.text = "Batch complete — $succeeded of ${batch.size} succeeded"; batchDetail.text = "Last processed: ${batch.lastOrNull()?.lastPathSegment}"; startBtn.text = actionLabel(); startBtn.isEnabled = queue.isNotEmpty() }
+            FolderWatcher.log(this, "Batch $mode finished: $succeeded/${batch.size} succeeded")
         }.start()
     }
     private fun loadImage(uri: Uri): ImageData {
         val bytes = contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: error("cannot read file")
         if (bytes.size > 8 && bytes[0] == 137.toByte()) try { return decodePNG(bytes) } catch (_: Exception) { }
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+        requireProcessableImage(bounds.outWidth, bounds.outHeight)
         val bmp = BitmapFactory.decodeByteArray(bytes, 0, bytes.size) ?: error("unsupported image format")
         val argb = IntArray(bmp.width * bmp.height); bmp.getPixels(argb, 0, bmp.width, 0, 0, bmp.width, bmp.height)
         val opaque = argb.all { it ushr 24 == 0xff }; val channels = if (opaque) 3 else 4; val pixels = ByteArray(argb.size * channels)

@@ -63,7 +63,7 @@ fun decodePNG(bytes: ByteArray): ImageData {
         val type = String(bytes, off + 4, 4, Charsets.US_ASCII)
         val data = bytes.copyOfRange(off + 8, off + 8 + len)
         when (type) {
-            "IHDR" -> { width = be32(data, 0); height = be32(data, 4); bitDepth = data[8].toInt(); colorType = data[9].toInt(); interlace = data[12].toInt() }
+            "IHDR" -> { width = be32(data, 0); height = be32(data, 4); requireProcessableImage(width, height); bitDepth = data[8].toInt(); colorType = data[9].toInt(); interlace = data[12].toInt() }
             "PLTE" -> plte = data
             "IDAT" -> idat.add(data)
             "IEND" -> break

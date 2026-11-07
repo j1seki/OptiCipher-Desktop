@@ -4,6 +4,7 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.content.Context
 import android.database.ContentObserver
+import android.graphics.BitmapFactory
 import android.net.Uri
 import android.os.Build
 import android.os.Handler
@@ -44,6 +45,7 @@ object FolderWatcher {
     private const val EXISTING = "process_existing"
     private const val CONFLICT = "conflict" // skip or overwrite; background cannot prompt
     private const val PROCESSED = "processed"
+    private const val LOGS = "activity_logs"
     private val observers = mutableMapOf<String, ContentObserver>()
 
     private fun key(mode: String, name: String) = "${mode}_$name"
@@ -128,6 +130,7 @@ object FolderWatcher {
         prefs(ctx).edit().putStringSet(key(mode, PROCESSED), items).apply()
 
     fun notify(ctx: Context, text: String) {
+        log(ctx, text)
         val notifications = ctx.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         if (Build.VERSION.SDK_INT >= 26) notifications.createNotificationChannel(
             NotificationChannel("watch", "Folder watch", NotificationManager.IMPORTANCE_LOW))
@@ -135,6 +138,20 @@ object FolderWatcher {
             .setContentTitle("OptiCipher").setContentText(text).setAutoCancel(true).build()
         try { notifications.notify(text.hashCode(), notification) } catch (_: Exception) { }
     }
+
+    /** A small persistent, newest-first activity log visible in the app. */
+    fun log(ctx: Context, text: String) {
+        val stamp = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.getDefault()).format(java.util.Date())
+        val old = prefs(ctx).getStringSet(LOGS, emptySet()) ?: emptySet()
+        // Store sequence-prefixed entries: StringSet does not retain insertion order.
+        val entries = old.mapNotNull { item -> item.substringAfter('|', "").takeIf { it.isNotEmpty() } }.toMutableList()
+        entries.add(0, "$stamp  $text")
+        prefs(ctx).edit().putStringSet(LOGS, entries.take(80).mapIndexed { index, value -> "%03d|%s".format(index, value) }.toSet()).apply()
+    }
+
+    fun activityLog(ctx: Context): List<String> = (prefs(ctx).getStringSet(LOGS, emptySet()) ?: emptySet())
+        .sortedBy { it.substringBefore('|').toIntOrNull() ?: Int.MAX_VALUE }.map { it.substringAfter('|') }
+    fun clearActivityLog(ctx: Context) = prefs(ctx).edit().remove(LOGS).apply()
 }
 
 class WatchWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx, params) {
@@ -153,10 +170,18 @@ class WatchWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx,
             val processed = applicationContext.getSharedPreferences("folder_watch", Context.MODE_PRIVATE)
                 .getStringSet("${mode}_processed", emptySet())!!.toMutableSet()
             var written = 0
+            var eligible = 0
+            FolderWatcher.log(applicationContext, "Auto-$mode scan started")
             for (source in inbox.listFiles()) {
-                if (!source.isFile || source.uri.toString() in processed || source.name?.lowercase()?.endsWith(".png") != true) continue
+                if (!source.isFile || source.uri.toString() in processed) continue
+                // Ciphertext is always PNG. Encrypt, however, accepts the same
+                // common camera/image formats as the manual batch screen.
+                val inputName = source.name ?: continue
+                if (mode == FolderWatcher.ENCRYPT && !isEncryptableImageName(inputName)) continue
+                if (mode == FolderWatcher.DECRYPT && !inputName.lowercase().endsWith(".png")) continue
+                eligible++
                 val bytes = applicationContext.contentResolver.openInputStream(source.uri)?.use { it.readBytes() } ?: continue
-                val image = try { decodePNG(bytes) } catch (_: Exception) { continue }
+                val image = try { decodeWatchImage(bytes) } catch (_: Exception) { continue }
                 val encrypted = isOptiCipher(image)
                 // Encrypt only plaintext; decrypt only files that actually carry an OPTC header.
                 if ((mode == FolderWatcher.ENCRYPT && encrypted) || (mode == FolderWatcher.DECRYPT && !encrypted)) {
@@ -179,6 +204,8 @@ class WatchWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx,
             applicationContext.getSharedPreferences("folder_watch", Context.MODE_PRIVATE).edit()
                 .putStringSet("${mode}_processed", processed).apply()
             if (written > 0) FolderWatcher.notify(applicationContext, "OptiCipher: $written file(s) ${mode}ed by folder watch")
+            else if (eligible > 0) FolderWatcher.notify(applicationContext, "OptiCipher: no $mode output written — files may already exist or be unreadable")
+            else FolderWatcher.log(applicationContext, "Auto-$mode scan finished — no eligible files")
             Result.success()
         } catch (exception: Exception) {
             FolderWatcher.notify(applicationContext, "OptiCipher: $mode watch failed — ${exception.message}")
@@ -208,4 +235,31 @@ class WatchWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx,
         image.pixels[start] == 0x4f.toByte() && image.pixels[start + 1] == 0x50.toByte() &&
             image.pixels[start + 2] == 0x54.toByte() && image.pixels[start + 3] == 0x43.toByte()
     } catch (_: Exception) { false }
+
+    private fun isEncryptableImageName(name: String): Boolean {
+        val lower = name.lowercase()
+        return lower.endsWith(".png") || lower.endsWith(".jpg") || lower.endsWith(".jpeg") ||
+            lower.endsWith(".webp") || lower.endsWith(".bmp")
+    }
+
+    /** Decode PNG losslessly when possible; decode other camera formats to RGBA/RGB for encryption. */
+    private fun decodeWatchImage(bytes: ByteArray): ImageData {
+        if (bytes.size > 8 && bytes[0] == 137.toByte()) try { return decodePNG(bytes) } catch (_: Exception) { }
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+        requireProcessableImage(bounds.outWidth, bounds.outHeight)
+        val bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size) ?: error("unsupported image format")
+        val argb = IntArray(bitmap.width * bitmap.height)
+        bitmap.getPixels(argb, 0, bitmap.width, 0, 0, bitmap.width, bitmap.height)
+        val opaque = argb.all { it ushr 24 == 0xff }
+        val channels = if (opaque) 3 else 4
+        val pixels = ByteArray(argb.size * channels)
+        for (n in argb.indices) {
+            pixels[n * channels] = ((argb[n] ushr 16) and 255).toByte()
+            pixels[n * channels + 1] = ((argb[n] ushr 8) and 255).toByte()
+            pixels[n * channels + 2] = (argb[n] and 255).toByte()
+            if (!opaque) pixels[n * 4 + 3] = ((argb[n] ushr 24) and 255).toByte()
+        }
+        return ImageData(pixels, bitmap.width, bitmap.height, channels)
+    }
 }
