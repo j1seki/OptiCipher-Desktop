@@ -46,6 +46,7 @@ async function decodeNative(file) {
 }
 
 async function decodeHeif(file, isAvif) {
+  if (!simdSupported()) return decodeNative(file);
   const codec = isAvif ? avif : heic;
   const ready = isAvif ? (avifReady ??= codec.loadDecoder(avifWasmUrl))
     : (heicReady ??= codec.loadDecoder(heicWasmUrl));
