@@ -1,363 +1,47 @@
 <?xml version="1.0" encoding="utf-8"?>
 <androidx.coordinatorlayout.widget.CoordinatorLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
-    xmlns:tools="http://schemas.android.com/tools"
-    android:id="@+id/root"
-    android:layout_width="match_parent"
-    android:layout_height="match_parent"
-    tools:context=".MainActivity">
-
-    <com.google.android.material.appbar.AppBarLayout
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        app:elevation="0dp">
-
-        <com.google.android.material.appbar.MaterialToolbar
-            android:layout_width="match_parent"
-            android:layout_height="?attr/actionBarSize"
-            app:title="OptiCipher"
-            app:subtitle="100% on-device · bit-compatible with desktop"
-            app:titleTextColor="?attr/colorOnSurface" />
-
+    android:id="@+id/root" android:layout_width="match_parent" android:layout_height="match_parent">
+    <com.google.android.material.appbar.AppBarLayout android:layout_width="match_parent" android:layout_height="wrap_content" app:elevation="0dp">
+        <com.google.android.material.appbar.MaterialToolbar android:layout_width="match_parent" android:layout_height="?attr/actionBarSize"
+            app:title="OptiCipher" app:subtitle="Private, on-device image encryption" app:titleTextColor="?attr/colorOnSurface" />
     </com.google.android.material.appbar.AppBarLayout>
-
-    <androidx.core.widget.NestedScrollView
-        android:id="@+id/scroll"
-        android:layout_width="match_parent"
-        android:layout_height="match_parent"
-        android:fillViewport="true"
-        android:padding="16dp"
-        app:layout_behavior="@string/appbar_scrolling_view_behavior">
-
-        <LinearLayout
-            android:orientation="vertical"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content">
-
-            <!-- ============ MANUAL BATCH JOB ============ -->
-            <com.google.android.material.card.MaterialCardView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginBottom="12dp"
-                app:cardElevation="2dp">
-
-                <LinearLayout
-                    android:orientation="vertical"
-                    android:padding="16dp"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content">
-
-                    <TextView
-                        android:text="1 · Batch job"
-                        android:textAppearance="?attr/textAppearanceTitleMedium"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content" />
-
-                    <TextView
-                        android:text="Pick files or a whole folder, review the queue, then press Start. Nothing runs until you do."
-                        android:textAppearance="?attr/textAppearanceBodySmall"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content" />
-
-                    <com.google.android.material.chip.ChipGroup
-                        android:id="@+id/modeGroup"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content">
-
-                        <com.google.android.material.chip.Chip
-                            android:id="@+id/modeEncrypt"
-                            android:text="Encrypt"
-                            android:checkable="true"
-                            android:checked="true"
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content" />
-
-                        <com.google.android.material.chip.Chip
-                            android:id="@+id/modeDecrypt"
-                            android:text="Decrypt"
-                            android:checkable="true"
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content" />
-
-                        <com.google.android.material.chip.Chip
-                            android:id="@+id/modeVerify"
-                            android:text="Verify"
-                            android:checkable="true"
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content" />
-
+    <androidx.core.widget.NestedScrollView android:layout_width="match_parent" android:layout_height="match_parent"
+        android:fillViewport="true" android:padding="16dp" app:layout_behavior="@string/appbar_scrolling_view_behavior">
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical">
+            <com.google.android.material.card.MaterialCardView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginBottom="12dp" app:cardElevation="2dp">
+                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:padding="16dp">
+                    <TextView android:text="1 · Encrypt, decrypt, or verify files" android:textAppearance="?attr/textAppearanceTitleMedium" android:layout_width="wrap_content" android:layout_height="wrap_content" />
+                    <TextView android:text="Add individual images or the top-level images from a folder. Review the queue, then run the selected action." android:textAppearance="?attr/textAppearanceBodySmall" android:layout_width="wrap_content" android:layout_height="wrap_content" />
+                    <com.google.android.material.chip.ChipGroup android:id="@+id/modeGroup" android:layout_width="wrap_content" android:layout_height="wrap_content" app:singleSelection="true">
+                        <com.google.android.material.chip.Chip android:id="@+id/modeEncrypt" android:text="Encrypt" android:checkable="true" android:checked="true" android:layout_width="wrap_content" android:layout_height="wrap_content" />
+                        <com.google.android.material.chip.Chip android:id="@+id/modeDecrypt" android:text="Decrypt" android:checkable="true" android:layout_width="wrap_content" android:layout_height="wrap_content" />
+                        <com.google.android.material.chip.Chip android:id="@+id/modeVerify" android:text="Verify" android:checkable="true" android:layout_width="wrap_content" android:layout_height="wrap_content" />
                     </com.google.android.material.chip.ChipGroup>
-
-                    <LinearLayout
-                        android:orientation="horizontal"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content">
-
-                        <com.google.android.material.button.MaterialButton
-                            android:id="@+id/pickBtn"
-                            android:text="Pick images…"
-                            android:layout_width="0dp"
-                            android:layout_height="wrap_content"
-                            android:layout_weight="1" />
-
-                        <com.google.android.material.button.MaterialButton
-                            android:id="@+id/pickFolderBtn"
-                            style="?attr/materialButtonOutlinedStyle"
-                            android:text="Pick folder…"
-                            android:layout_width="0dp"
-                            android:layout_height="wrap_content"
-                            android:layout_weight="1" />
-
+                    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal">
+                        <com.google.android.material.button.MaterialButton android:id="@+id/pickBtn" android:text="Add images…" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" />
+                        <com.google.android.material.button.MaterialButton android:id="@+id/pickFolderBtn" style="?attr/materialButtonOutlinedStyle" android:text="Add folder…" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" />
                     </LinearLayout>
-
-                    <TextView
-                        android:id="@+id/queueView"
-                        android:text="Queue is empty."
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content" />
-
-                    <com.google.android.material.button.MaterialButton
-                        android:id="@+id/clearQueueBtn"
-                        style="@style/Widget.Material3.Button.TextButton"
-                        android:text="Clear queue"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content" />
-
-                    <com.google.android.material.textfield.TextInputLayout
-                        android:hint="Passphrase"
-                        app:endIconMode="none"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content">
-
-                        <com.google.android.material.textfield.TextInputEditText
-                            android:id="@+id/pass"
-                            android:inputType="textPassword"
-                            android:layout_width="match_parent"
-                            android:layout_height="wrap_content" />
-
-                    </com.google.android.material.textfield.TextInputLayout>
-
-                    <TextView
-                        android:id="@+id/iterLabel"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content" />
-
-                    <com.google.android.material.slider.Slider
-                        android:id="@+id/iter"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:value="200000"
-                        android:valueFrom="10000"
-                        android:valueTo="2000000"
-                        android:stepSize="10000" />
-
-                    <TextView
-                        android:id="@+id/manualOutView"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content" />
-
-                    <com.google.android.material.button.MaterialButton
-                        android:id="@+id/outputBtn"
-                        style="?attr/materialButtonOutlinedStyle"
-                        android:text="Set output folder…"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content" />
-
-                    <com.google.android.material.button.MaterialButton
-                        android:id="@+id/startBtn"
-                        android:text="▶  Start"
-                        android:enabled="false"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content" />
-
-                    <ImageView
-                        android:id="@+id/preview"
-                        android:visibility="gone"
-                        android:layout_width="match_parent"
-                        android:layout_height="240dp"
-                        android:scaleType="fitCenter" />
-
-                    <LinearLayout
-                        android:id="@+id/results"
-                        android:orientation="vertical"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content" />
-
+                    <TextView android:id="@+id/queueView" android:text="Queue is empty." android:layout_width="wrap_content" android:layout_height="wrap_content" />
+                    <com.google.android.material.button.MaterialButton android:id="@+id/clearQueueBtn" style="@style/Widget.Material3.Button.TextButton" android:text="Clear queue" android:layout_width="wrap_content" android:layout_height="wrap_content" />
+                    <com.google.android.material.textfield.TextInputLayout android:hint="Passphrase" android:layout_width="match_parent" android:layout_height="wrap_content"><com.google.android.material.textfield.TextInputEditText android:id="@+id/pass" android:inputType="textPassword" android:layout_width="match_parent" android:layout_height="wrap_content" /></com.google.android.material.textfield.TextInputLayout>
+                    <TextView android:id="@+id/iterLabel" android:layout_width="wrap_content" android:layout_height="wrap_content" />
+                    <com.google.android.material.slider.Slider android:id="@+id/iter" android:value="200000" android:valueFrom="10000" android:valueTo="2000000" android:stepSize="10000" android:layout_width="match_parent" android:layout_height="wrap_content" />
+                    <TextView android:id="@+id/manualOutView" android:layout_width="wrap_content" android:layout_height="wrap_content" />
+                    <com.google.android.material.button.MaterialButton android:id="@+id/outputBtn" style="?attr/materialButtonOutlinedStyle" android:text="Choose batch output folder…" android:layout_width="match_parent" android:layout_height="wrap_content" />
+                    <com.google.android.material.button.MaterialButton android:id="@+id/startBtn" android:text="Encrypt queued files" android:enabled="false" android:layout_width="match_parent" android:layout_height="wrap_content" />
+                    <ImageView android:id="@+id/preview" android:visibility="gone" android:scaleType="fitCenter" android:layout_width="match_parent" android:layout_height="240dp" />
+                    <LinearLayout android:id="@+id/results" android:orientation="vertical" android:layout_width="match_parent" android:layout_height="wrap_content" />
                 </LinearLayout>
-
             </com.google.android.material.card.MaterialCardView>
 
-            <!-- ============ FOLDER WATCH (independent settings) ============ -->
-            <com.google.android.material.card.MaterialCardView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                app:cardElevation="2dp">
-
-                <LinearLayout
-                    android:orientation="vertical"
-                    android:padding="16dp"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content">
-
-                    <TextView
-                        android:text="2 · Folder watch — auto encrypt/decrypt"
-                        android:textAppearance="?attr/textAppearanceTitleMedium"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content" />
-
-                    <TextView
-                        android:text="Runs in the background with its own passphrase, output folder and check interval — independent of the batch job above."
-                        android:textAppearance="?attr/textAppearanceBodySmall"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content" />
-
-                    <com.google.android.material.chip.ChipGroup
-                        android:id="@+id/watchModeGroup"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content">
-
-                        <com.google.android.material.chip.Chip
-                            android:id="@+id/watchModeEncrypt"
-                            android:text="Encrypt new files"
-                            android:checkable="true"
-                            android:checked="true"
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content" />
-
-                        <com.google.android.material.chip.Chip
-                            android:id="@+id/watchModeDecrypt"
-                            android:text="Decrypt new files"
-                            android:checkable="true"
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content" />
-
-                    </com.google.android.material.chip.ChipGroup>
-
-                    <com.google.android.material.textfield.TextInputLayout
-                        android:hint="Watch passphrase (for background processing)"
-                        app:endIconMode="none"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content">
-
-                        <com.google.android.material.textfield.TextInputEditText
-                            android:id="@+id/watchPass"
-                            android:inputType="textPassword"
-                            android:layout_width="match_parent"
-                            android:layout_height="wrap_content" />
-
-                    </com.google.android.material.textfield.TextInputLayout>
-
-                    <com.google.android.material.checkbox.MaterialCheckBox
-                        android:id="@+id/watchRememberChk"
-                        android:text="Remember watch passphrase (encrypted — required for background runs)"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content" />
-
-                    <TextView
-                        android:text="Check for new files every:"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content" />
-
-                    <com.google.android.material.chip.ChipGroup
-                        android:id="@+id/intervalGroup"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content">
-
-                        <com.google.android.material.chip.Chip
-                            android:id="@+id/intervalImmediate"
-                            android:text="Immediately"
-                            android:checkable="true"
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content" />
-
-                        <com.google.android.material.chip.Chip
-                            android:id="@+id/interval15"
-                            android:text="15 min"
-                            android:checkable="true"
-                            android:checked="true"
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content" />
-
-                        <com.google.android.material.chip.Chip
-                            android:id="@+id/interval60"
-                            android:text="1 hour"
-                            android:checkable="true"
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content" />
-
-                        <com.google.android.material.chip.Chip
-                            android:id="@+id/interval360"
-                            android:text="6 hours"
-                            android:checkable="true"
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content" />
-
-                    </com.google.android.material.chip.ChipGroup>
-
-                    <TextView
-                        android:id="@+id/watchOutView"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content" />
-
-                    <com.google.android.material.button.MaterialButton
-                        android:id="@+id/watchOutBtn"
-                        style="?attr/materialButtonOutlinedStyle"
-                        android:text="Set watch output folder…"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content" />
-
-                    <TextView
-                        android:id="@+id/watchStatus"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content" />
-
-                    <LinearLayout
-                        android:orientation="horizontal"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content">
-
-                        <com.google.android.material.button.MaterialButton
-                            android:id="@+id/watchBtn"
-                            android:text="Pick watched folder…"
-                            android:layout_width="0dp"
-                            android:layout_height="wrap_content"
-                            android:layout_weight="1" />
-
-                        <com.google.android.material.button.MaterialButton
-                            android:id="@+id/watchStartBtn"
-                            style="?attr/materialButtonOutlinedStyle"
-                            android:text="Start"
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content" />
-
-                        <com.google.android.material.button.MaterialButton
-                            android:id="@+id/watchOffBtn"
-                            style="?attr/materialButtonOutlinedStyle"
-                            android:text="Stop"
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content" />
-
-                    </LinearLayout>
-
-                    <com.google.android.material.checkbox.MaterialCheckBox
-                        android:id="@+id/moveChk"
-                        android:text="Move originals after processing (off = copy)"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content" />
-
-                    <com.google.android.material.button.MaterialButton
-                        android:id="@+id/permBtn"
-                        style="?attr/materialButtonOutlinedStyle"
-                        android:text="Permissions &amp; battery settings"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content" />
-
-                </LinearLayout>
-
+            <com.google.android.material.card.MaterialCardView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginBottom="12dp" app:cardElevation="2dp">
+                <include layout="@layout/watch_encrypt" />
             </com.google.android.material.card.MaterialCardView>
-
+            <com.google.android.material.card.MaterialCardView android:layout_width="match_parent" android:layout_height="wrap_content" app:cardElevation="2dp">
+                <include layout="@layout/watch_decrypt" />
+            </com.google.android.material.card.MaterialCardView>
+            <com.google.android.material.button.MaterialButton android:id="@+id/permBtn" style="?attr/materialButtonOutlinedStyle" android:text="Folder access, notifications &amp; battery" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="12dp" />
         </LinearLayout>
-
     </androidx.core.widget.NestedScrollView>
-
 </androidx.coordinatorlayout.widget.CoordinatorLayout>
