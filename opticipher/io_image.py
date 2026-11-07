@@ -91,9 +91,10 @@ def load_image(path: PathLike) -> np.ndarray:
     # Camera RAW is decoded by LibRaw through the optional rawpy dependency.
     # Do not route RAW through Pillow: many RAW files are not Pillow images.
     if suffix in {
-        ".dng", ".cr2", ".cr3", ".nef", ".arw", ".orf", ".rw2", ".raf",
-        ".pef", ".srw", ".3fr", ".iiq", ".k25", ".kdc", ".dcr", ".erf",
-        ".mef", ".mos", ".mrw", ".nrw", ".obm", ".rwl", ".x3f",
+        ".dng", ".cr2", ".cr3", ".crw", ".nef", ".nrw", ".arw", ".sr2", ".srf",
+        ".orf", ".ori", ".rw2", ".rwl", ".raf", ".pef", ".srw", ".3fr", ".fff",
+        ".iiq", ".k25", ".kdc", ".dcr", ".dcs", ".erf", ".mef", ".mos", ".mrw",
+        ".obm", ".x3f", ".ari", ".gpr",
     }:
         try:
             import rawpy
