@@ -12,8 +12,26 @@ android {
         versionCode 3
         versionName '1.4.2'
     }
+    signingConfigs {
+        release {
+            // CI provides these through repository secrets. Local builds fall
+            // back to the debug key so `assembleRelease` still works.
+            def storePath = System.getenv("ANDROID_KEYSTORE_FILE")
+            if (storePath) {
+                storeFile file(storePath)
+                storePassword System.getenv("ANDROID_KEYSTORE_PASSWORD")
+                keyAlias System.getenv("ANDROID_KEY_ALIAS")
+                keyPassword System.getenv("ANDROID_KEY_PASSWORD")
+            }
+        }
+    }
     buildTypes {
-        release { minifyEnabled false }
+        release {
+            minifyEnabled false
+            // A stable signing key is required for in-app updates to install
+            // over an existing build.
+            signingConfig System.getenv("ANDROID_KEYSTORE_FILE") ? signingConfigs.release : signingConfigs.debug
+        }
         debug { }
     }
     compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
@@ -26,6 +44,6 @@ dependencies {
     implementation 'androidx.documentfile:documentfile:1.0.1'
     implementation 'androidx.work:work-runtime-ktx:2.9.0'
     implementation 'androidx.security:security-crypto:1.1.0'
-    implementation 'com.github.dburckh:AndroidLibRaw:2.0.5'
+    implementation 'com.github.dburckh:AndroidLibRaw:2.0.7'
     testImplementation 'junit:junit:4.13.2'
 }

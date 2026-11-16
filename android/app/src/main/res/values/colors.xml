@@ -7,4 +7,9 @@
     <color name="brand_bg">#101318</color>
     <color name="brand_surface">#1B202A</color>
     <color name="brand_on_accent">#062018</color>
+    <color name="brand_on_surface">#E6EDF3</color>
+    <color name="brand_muted">#93A1B0</color>
+    <color name="brand_outline">#2C3542</color>
+    <color name="brand_error">#FF6B6B</color>
+    <color name="brand_success">#38D6A3</color>
 </resources>

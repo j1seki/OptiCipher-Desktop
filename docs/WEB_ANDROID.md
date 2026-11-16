@@ -60,9 +60,9 @@ uses the supported path:
    reboot, no broad storage permission needed — this is why `MANAGE_EXTERNAL_STORAGE`
    / all-files access is deliberately avoided: Play policy would reject it).
 2. A **`ContentObserver`** on that tree queues new/changed files, plus a
-   **WorkManager periodic poll (15 min)** as a fallback for OEM file managers
-   that don't fire change events. Doze rules out a permanent foreground
-   service, so WorkManager is the right primitive.
+   lightweight **foreground watcher service** that checks at the selected
+   interval (**Instant / 15 min / 1 hour**). A **WorkManager periodic poll**
+   remains as a fallback when the service is not running.
 3. Each new PNG is checked for an existing **`OPTC` header** (by content, not
    filename) so already-encrypted files are never re-encrypted; the output
    folder is excluded to prevent loops.
@@ -70,19 +70,21 @@ uses the supported path:
    overwriting** (`_2`, `_3`…), matching desktop behaviour. Originals are
    copied by default; "move originals" is an opt-in toggle.
 
-**Passphrase:** needed to process anything. Default is *in-memory only* —
-the watcher then queues files and notifies "open the app to process". Enabling
-**"Remember passphrase"** stores it in `EncryptedSharedPreferences` (AES-256)
-so background processing works unattended. Nothing is ever sent anywhere.
+**Passphrase:** needed to process anything. Batch work can use an in-memory
+passphrase, but background watching requires **"Remember passphrase"**, which
+stores it in `EncryptedSharedPreferences` (AES-256). If the Keystore-backed
+store is unavailable (for example after a device restore), the app reports the
+problem instead of crashing. Nothing is ever sent anywhere.
 
 **Permission flow** (asked lazily, in this order):
 
 | When | What | Why |
 |---|---|---|
-| Picking folders | none (system picker grants it) | SAF tree + persistable URI |
-| First media access | `READ_MEDIA_IMAGES` (13+) / `READ_EXTERNAL_STORAGE` (≤12) / partial `READ_MEDIA_VISUAL_USER_SELECTED` (14+) | camera-roll style sources |
-| Background work | `POST_NOTIFICATIONS` (13+), battery-optimisation exemption prompt | completion notice; WorkManager not throttled |
-| During a batch | `FOREGROUND_SERVICE_DATA_SYNC` (14+, declared in manifest) | long batches |
+| Picking files/folders | none (system picker grants it) | SAF document/tree URI + persistable grant |
+| Optional photo library | `READ_MEDIA_IMAGES` (13+) / `READ_EXTERNAL_STORAGE` (≤12), plus `READ_MEDIA_VISUAL_USER_SELECTED` (14+ partial access) | only if granted from **Permissions**; the picker works without it |
+| Turning on a watch | `POST_NOTIFICATIONS` (13+) | background completion notices |
+| Optional battery settings | battery-optimisation settings screen (no restricted permission) | keeps the background watcher alive |
+| All-files access | **not requested** | SAF per-folder grants are used instead |
 
 ### Image format decoding
 

@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Never restore preferences across devices/installs: SAF grants and the
+     encrypted-passphrase master key are device-bound, so a restored copy would
+     be unusable (and EncryptedSharedPreferences can crash on a stale key). -->
+<full-backup-content>
+    <exclude domain="sharedpref" path="." />
+</full-backup-content>

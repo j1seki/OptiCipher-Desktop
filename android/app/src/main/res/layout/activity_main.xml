@@ -1,25 +1,84 @@
 <?xml version="1.0" encoding="utf-8"?>
-<androidx.coordinatorlayout.widget.CoordinatorLayout xmlns:android="http://schemas.android.com/apk/res/android" xmlns:app="http://schemas.android.com/apk/res-auto" android:id="@+id/root" android:layout_width="match_parent" android:layout_height="match_parent">
-    <com.google.android.material.appbar.AppBarLayout android:layout_width="match_parent" android:layout_height="wrap_content" app:elevation="0dp">
-        <com.google.android.material.appbar.MaterialToolbar android:layout_width="match_parent" android:layout_height="?attr/actionBarSize" app:title="OptiCipher" app:subtitle="Private, on-device image encryption" app:titleTextColor="?attr/colorOnSurface" />
-        <com.google.android.material.tabs.TabLayout android:id="@+id/mainTabs" android:layout_width="match_parent" android:layout_height="wrap_content" app:tabMode="scrollable" app:tabGravity="fill">
-            <com.google.android.material.tabs.TabItem android:text="Batch" />
-            <com.google.android.material.tabs.TabItem android:text="Auto-encrypt" />
-            <com.google.android.material.tabs.TabItem android:text="Auto-decrypt" />
-            <com.google.android.material.tabs.TabItem android:text="Activity" />
-        </com.google.android.material.tabs.TabLayout>
+<androidx.coordinatorlayout.widget.CoordinatorLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:id="@+id/root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="?attr/colorSurface">
+
+    <com.google.android.material.appbar.AppBarLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="?attr/colorSurface"
+        app:elevation="0dp">
+
+        <com.google.android.material.appbar.MaterialToolbar
+            android:id="@+id/toolbar"
+            android:layout_width="match_parent"
+            android:layout_height="?attr/actionBarSize"
+            app:menu="@menu/main_toolbar"
+            app:title="OptiCipher"
+            app:titleTextColor="?attr/colorOnSurface" />
     </com.google.android.material.appbar.AppBarLayout>
-    <FrameLayout android:layout_width="match_parent" android:layout_height="match_parent" app:layout_behavior="@string/appbar_scrolling_view_behavior">
-        <androidx.core.widget.NestedScrollView android:id="@+id/batchPage" android:layout_width="match_parent" android:layout_height="match_parent" android:fillViewport="true"><include layout="@layout/page_batch" /></androidx.core.widget.NestedScrollView>
-        <androidx.core.widget.NestedScrollView android:id="@+id/encryptPage" android:visibility="gone" android:layout_width="match_parent" android:layout_height="match_parent" android:fillViewport="true"><include layout="@layout/watch_encrypt" /></androidx.core.widget.NestedScrollView>
-        <androidx.core.widget.NestedScrollView android:id="@+id/decryptPage" android:visibility="gone" android:layout_width="match_parent" android:layout_height="match_parent" android:fillViewport="true"><include layout="@layout/watch_decrypt" /></androidx.core.widget.NestedScrollView>
-        <LinearLayout android:id="@+id/activityPage" android:visibility="gone" android:orientation="vertical" android:padding="16dp" android:layout_width="match_parent" android:layout_height="match_parent">
-            <TextView android:text="Activity &amp; background processing" android:textAppearance="?attr/textAppearanceTitleLarge" android:layout_width="wrap_content" android:layout_height="wrap_content" />
-            <TextView android:id="@+id/backgroundStatus" android:layout_marginTop="8dp" android:layout_width="wrap_content" android:layout_height="wrap_content" />
-            <com.google.android.material.button.MaterialButton android:id="@+id/permissionsBtn" style="?attr/materialButtonOutlinedStyle" android:text="Permissions &amp; battery status" android:layout_width="match_parent" android:layout_height="wrap_content" />
-            <com.google.android.material.button.MaterialButton android:id="@+id/refreshLogBtn" style="?attr/materialButtonOutlinedStyle" android:text="Refresh activity" android:layout_width="match_parent" android:layout_height="wrap_content" />
-            <com.google.android.material.button.MaterialButton android:id="@+id/clearLogBtn" style="@style/Widget.Material3.Button.TextButton" android:text="Clear activity log" android:layout_width="wrap_content" android:layout_height="wrap_content" />
-            <TextView android:id="@+id/activityLog" android:fontFamily="monospace" android:textSize="12sp" android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" android:paddingTop="8dp" />
-        </LinearLayout>
+
+    <FrameLayout
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:layout_marginBottom="80dp"
+        app:layout_behavior="@string/appbar_scrolling_view_behavior">
+
+        <androidx.core.widget.NestedScrollView
+            android:id="@+id/batchPage"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:clipToPadding="false"
+            android:fillViewport="true">
+
+            <include layout="@layout/page_batch" />
+        </androidx.core.widget.NestedScrollView>
+
+        <androidx.core.widget.NestedScrollView
+            android:id="@+id/watchPage"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:clipToPadding="false"
+            android:fillViewport="true"
+            android:visibility="gone">
+
+            <include layout="@layout/page_watch" />
+        </androidx.core.widget.NestedScrollView>
+
+        <androidx.core.widget.NestedScrollView
+            android:id="@+id/activityPage"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:clipToPadding="false"
+            android:fillViewport="true"
+            android:visibility="gone">
+
+            <include layout="@layout/page_activity" />
+        </androidx.core.widget.NestedScrollView>
     </FrameLayout>
+
+    <com.google.android.material.floatingactionbutton.ExtendedFloatingActionButton
+        android:id="@+id/startBtn"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom|end"
+        android:layout_marginEnd="16dp"
+        android:layout_marginBottom="96dp"
+        android:text="Encrypt files"
+        android:textColor="@color/brand_on_accent"
+        app:backgroundTint="@color/brand_accent"
+        app:icon="@drawable/ic_play"
+        app:iconTint="@color/brand_on_accent" />
+
+    <com.google.android.material.bottomnavigation.BottomNavigationView
+        android:id="@+id/bottomNav"
+        android:layout_width="match_parent"
+        android:layout_height="80dp"
+        android:layout_gravity="bottom"
+        android:background="@color/brand_surface"
+        app:labelVisibilityMode="labeled"
+        app:menu="@menu/main_nav" />
 </androidx.coordinatorlayout.widget.CoordinatorLayout>

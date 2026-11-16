@@ -39,8 +39,9 @@ decrypts in all of them):
   exact NumPy SeedSequence/PCG64 port for the pixel scramble) with a
   lossless PNG codec — files are processed locally and never uploaded.
 - **Android (`android/`)** — a native Kotlin app distributed as an **APK**,
-  with **SAF-based folder watching** for auto encrypt/decrypt, WorkManager
-  background processing, and the correct scoped-storage permission flows.
+  with **SAF-based folder watching** for auto encrypt/decrypt, a lightweight
+  foreground watcher service plus WorkManager fallback for background
+  processing, and the correct scoped-storage permission flows.
   Its crypto core is unit-tested against a ciphertext produced by this
   desktop build.
 
@@ -392,8 +393,30 @@ cd android
 Releases: pushing a version tag also builds the APK in
 [`.github/workflows/android.yml`](.github/workflows/android.yml) and attaches
 it (`OptiCipher-android.apk`) to the GitHub Release alongside the desktop
-installers. The debug APK is unsigned-for-release — sideload it directly, or
-sign it with your own keystore for distribution.
+installers.
+
+**In-app updates.** The Activity tab has **Check for updates**, which reads
+the latest GitHub Release, downloads `OptiCipher-android.apk`, verifies its
+package name, version, size/checksum (when GitHub publishes one) and signing
+certificate, then opens the system installer. On first use Android asks you
+to allow installs from OptiCipher; the app opens that settings page
+automatically.
+
+Android only installs an update signed with the **same key** as the installed
+app. Add these repository secrets so every tagged release uses one stable
+key:
+
+| Secret | Value |
+| --- | --- |
+| `ANDROID_KEYSTORE_BASE64` | base64 of your `.jks`/`.keystore` file |
+| `ANDROID_KEYSTORE_PASSWORD` | keystore password |
+| `ANDROID_KEY_ALIAS` | key alias |
+| `ANDROID_KEY_PASSWORD` | key password |
+
+If `ANDROID_KEYSTORE_BASE64` is absent the workflow still builds a
+debug-signed APK, but in-app updates will reject it as a different signer.
+Bump `versionCode` and `versionName` in `android/app/build.gradle` for each
+release.
 
 **What the app does:** two independent sections, matching the workflow:
 
@@ -403,9 +426,10 @@ sign it with your own keystore for distribution.
    share/open intents, KDF cost control, safe (non-overwriting) outputs.
 2. **Folder watch** — its **own passphrase** (with its own encrypted
    "remember" toggle), its **own output folder**, its **own mode**
-   (encrypt/decrypt new files) and a **check interval** (immediately via
-   observer only, or poll every 15 min / 1 h / 6 h). Neither section shares
-   passphrase, output or mode with the other.
+   (encrypt/decrypt new files) and a **check interval** (Instant, 15 min or
+   1 hour; a foreground watcher checks in the background and WorkManager is
+   the fallback). Neither section shares passphrase, output or mode with the
+   other.
 
 **Folder watching — auto encrypt/decrypt.** Android's scoped storage (10+)
 has no general "watch any folder", so the app uses the supported path:
@@ -415,9 +439,9 @@ has no general "watch any folder", so the app uses the supported path:
    permission** (survives reboot, no broad storage permission — `MANAGE_EXTERNAL_STORAGE`
    is deliberately avoided: Play policy would reject it).
 2. A **`ContentObserver`** on that tree queues new/changed files immediately,
-   plus an optional **WorkManager periodic poll** (15 min / 1 h / 6 h,
-   selectable; "Immediately" means observer-only) as fallback for OEM file
-   managers that don't fire change events reliably.
+   plus a lightweight **foreground watcher service** that checks at the
+   selected interval (**Instant / 15 min / 1 hour**) and a **WorkManager
+   periodic poll** as a fallback when the service is not running.
 3. Each new PNG is checked for an existing **`OPTC` header** (by content, not
    filename) so already-encrypted files are never re-encrypted; the output
    folder is excluded to prevent loops. Outputs go to the watch's **own**
@@ -433,10 +457,11 @@ has no general "watch any folder", so the app uses the supported path:
 
 | When | What | Why |
 |---|---|---|
-| Picking folders | none (system picker grants it) | SAF tree + persistable URI |
-| First media access | `READ_MEDIA_IMAGES` (13+) / `READ_EXTERNAL_STORAGE` (≤12) / partial `READ_MEDIA_VISUAL_USER_SELECTED` (14+) | camera-roll style sources |
-| Background work | `POST_NOTIFICATIONS` (13+), battery-optimisation exemption prompt | completion notice; WorkManager not throttled |
-| During a batch | `FOREGROUND_SERVICE_DATA_SYNC` (14+, declared in manifest) | long batches |
+| Picking files/folders | none (system picker grants it) | SAF document/tree URI + persistable grant |
+| Optional photo library | `READ_MEDIA_IMAGES` (13+) / `READ_EXTERNAL_STORAGE` (≤12), plus `READ_MEDIA_VISUAL_USER_SELECTED` (14+ partial access) | only if you grant it from **Permissions**; the picker works without it |
+| Turning on a watch | `POST_NOTIFICATIONS` (13+) | background completion notices |
+| Optional battery settings | battery-optimisation settings screen (no restricted permission) | keeps the background watcher alive |
+| All-files access | **not requested** | SAF per-folder grants are used instead; Play policy rejects broad storage for this app |
 
 **Known limitations:** semi-transparent RGBA via `BitmapFactory` is lossy
 (Android premultiplies alpha) — opaque photos and all PNG ciphertexts
@@ -658,7 +683,8 @@ OptiCipher/
 │       ├── Crypto.kt        # PCG64/ChaCha20/PBKDF2/HMAC core (parity-tested)
 │       ├── PngCodec.kt      # lossless PNG codec (java.util.zip)
 │       ├── MainActivity.kt  # encrypt/decrypt/verify UI + share intents
-│       └── FolderWatcher.kt # SAF folder watch + WorkManager background jobs
+│       ├── FolderWatcher.kt # SAF folder watch + WorkManager background jobs
+│       └── WatchService.kt  # foreground watcher for near-instant background checks
 ├── .github/workflows/       # (fork) 3-OS CI build + smoke tests
 │   ├── build.yml            # desktop matrix + GitHub Release on v* tags
 │   ├── pages.yml            # web -> GitHub Pages

@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Android 12+: exclude preferences from cloud backup and device transfer.
+     Persistable SAF URI grants and the Keystore-backed master key do not move
+     with the app, so restoring these files leaves the app pointing at folders
+     it cannot open. -->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="sharedpref" path="." />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="sharedpref" path="." />
+    </device-transfer>
+</data-extraction-rules>

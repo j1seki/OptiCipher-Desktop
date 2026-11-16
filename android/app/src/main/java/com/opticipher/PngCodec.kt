@@ -28,7 +28,7 @@ private fun chunk(type: String, data: ByteArray): ByteArray {
     return out
 }
 
-fun encodePNG(pixels: ByteArray, width: Int, height: Int, channels: Int): ByteArray {
+fun encodePNG(pixels: ByteArray, width: Int, height: Int, channels: Int, compress: Boolean = true): ByteArray {
     val colorType = if (channels == 4) 6 else 2
     val ihdr = ByteArray(13)
     fun be(off: Int, v: Int) { ihdr[off] = (v ushr 24).toByte(); ihdr[off + 1] = (v ushr 16).toByte(); ihdr[off + 2] = (v ushr 8).toByte(); ihdr[off + 3] = v.toByte() }
@@ -36,12 +36,16 @@ fun encodePNG(pixels: ByteArray, width: Int, height: Int, channels: Int): ByteAr
     val stride = width * channels
     val raw = ByteArray((stride + 1) * height)
     for (y in 0 until height) System.arraycopy(pixels, y * stride, raw, y * (stride + 1) + 1, stride)
-    val deflater = Deflater(6)
+    val deflater = Deflater(if (compress) 6 else Deflater.NO_COMPRESSION)
     deflater.setInput(raw); deflater.finish()
-    val buf = ByteArray(raw.size + 1024); var idatLen = 0
-    while (!deflater.finished()) { val n = deflater.deflate(buf, idatLen, buf.size - idatLen); idatLen += n }
+    val compressed = java.io.ByteArrayOutputStream(raw.size + 4096)
+    val buf = ByteArray(64 * 1024)
+    while (!deflater.finished()) {
+        val n = deflater.deflate(buf)
+        if (n > 0) compressed.write(buf, 0, n) else if (deflater.needsInput()) break
+    }
     deflater.end()
-    val parts = listOf(PNG_SIG, chunk("IHDR", ihdr), chunk("IDAT", buf.copyOf(idatLen)), chunk("IEND", ByteArray(0)))
+    val parts = listOf(PNG_SIG, chunk("IHDR", ihdr), chunk("IDAT", compressed.toByteArray()), chunk("IEND", ByteArray(0)))
     val total = parts.sumOf { it.size }
     val out = ByteArray(total); var off = 0
     for (p in parts) { System.arraycopy(p, 0, out, off, p.size); off += p.size }

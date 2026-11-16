@@ -1,20 +1,395 @@
 <?xml version="1.0" encoding="utf-8"?>
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android" xmlns:app="http://schemas.android.com/apk/res-auto" android:orientation="vertical" android:padding="16dp" android:layout_width="match_parent" android:layout_height="wrap_content">
-    <TextView android:text="Batch processing" android:textAppearance="?attr/textAppearanceTitleLarge" android:layout_width="wrap_content" android:layout_height="wrap_content" />
-    <TextView android:text="Add files, choose an action, then start. Progress remains visible while work runs." android:textAppearance="?attr/textAppearanceBodySmall" android:layout_width="wrap_content" android:layout_height="wrap_content" />
-    <com.google.android.material.chip.ChipGroup android:id="@+id/modeGroup" app:singleSelection="true" android:layout_width="wrap_content" android:layout_height="wrap_content"><com.google.android.material.chip.Chip android:id="@+id/modeEncrypt" android:text="Encrypt" android:checkable="true" android:checked="true" android:layout_width="wrap_content" android:layout_height="wrap_content" /><com.google.android.material.chip.Chip android:id="@+id/modeDecrypt" android:text="Decrypt" android:checkable="true" android:layout_width="wrap_content" android:layout_height="wrap_content" /><com.google.android.material.chip.Chip android:id="@+id/modeVerify" android:text="Verify" android:checkable="true" android:layout_width="wrap_content" android:layout_height="wrap_content" /></com.google.android.material.chip.ChipGroup>
-    <LinearLayout android:orientation="horizontal" android:layout_width="match_parent" android:layout_height="wrap_content"><com.google.android.material.button.MaterialButton android:id="@+id/pickBtn" android:text="Add images…" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" /><com.google.android.material.button.MaterialButton android:id="@+id/pickFolderBtn" style="?attr/materialButtonOutlinedStyle" android:text="Add folder…" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" /></LinearLayout>
-    <TextView android:id="@+id/queueView" android:text="Queue is empty." android:layout_width="wrap_content" android:layout_height="wrap_content" />
-    <com.google.android.material.button.MaterialButton android:id="@+id/clearQueueBtn" style="@style/Widget.Material3.Button.TextButton" android:text="Clear queue" android:layout_width="wrap_content" android:layout_height="wrap_content" />
-    <com.google.android.material.textfield.TextInputLayout android:hint="Passphrase" android:layout_width="match_parent" android:layout_height="wrap_content"><com.google.android.material.textfield.TextInputEditText android:id="@+id/pass" android:inputType="textPassword" android:layout_width="match_parent" android:layout_height="wrap_content" /></com.google.android.material.textfield.TextInputLayout>
-    <TextView android:id="@+id/iterLabel" android:layout_width="wrap_content" android:layout_height="wrap_content" /><com.google.android.material.slider.Slider android:id="@+id/iter" android:value="200000" android:valueFrom="10000" android:valueTo="2000000" android:stepSize="10000" android:layout_width="match_parent" android:layout_height="wrap_content" />
-    <TextView android:id="@+id/manualOutView" android:layout_width="wrap_content" android:layout_height="wrap_content" /><com.google.android.material.button.MaterialButton android:id="@+id/outputBtn" style="?attr/materialButtonOutlinedStyle" android:text="Choose batch output folder…" android:layout_width="match_parent" android:layout_height="wrap_content" />
-    <TextView android:id="@+id/batchStatus" android:text="Ready" android:textAppearance="?attr/textAppearanceBodyMedium" android:layout_width="wrap_content" android:layout_height="wrap_content" />
-    <com.google.android.material.progressindicator.LinearProgressIndicator android:id="@+id/batchProgress" android:visibility="gone" android:layout_width="match_parent" android:layout_height="wrap_content" />
-    <TextView android:id="@+id/batchDetail" android:visibility="gone" android:layout_width="wrap_content" android:layout_height="wrap_content" />
-    <com.google.android.material.button.MaterialButton android:id="@+id/startBtn" android:text="Encrypt queued files" android:enabled="false" android:layout_width="match_parent" android:layout_height="wrap_content" />
-    <com.google.android.material.button.MaterialButton android:id="@+id/batchCheckBtn" style="?attr/materialButtonOutlinedStyle" android:text="Run setup &amp; encryption test" android:layout_width="match_parent" android:layout_height="wrap_content" />
-    <TextView android:id="@+id/batchCheckStatus" android:text="Run the test before your first batch." android:layout_width="wrap_content" android:layout_height="wrap_content" />
-    <ImageView android:id="@+id/preview" android:visibility="gone" android:scaleType="fitCenter" android:layout_width="match_parent" android:layout_height="180dp" />
-    <LinearLayout android:id="@+id/results" android:orientation="vertical" android:layout_width="match_parent" android:layout_height="wrap_content" />
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:padding="16dp"
+    android:paddingBottom="96dp">
+
+    <com.google.android.material.card.MaterialCardView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="12dp"
+        app:cardBackgroundColor="@color/brand_surface"
+        app:cardCornerRadius="24dp"
+        app:cardElevation="0dp"
+        app:strokeColor="@color/brand_outline"
+        app:strokeWidth="1dp">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:padding="16dp">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
+
+                <ImageView
+                    android:layout_width="22dp"
+                    android:layout_height="22dp"
+                    android:contentDescription="@null"
+                    android:src="@drawable/ic_shield"
+                    app:tint="@color/brand_accent" />
+
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="10dp"
+                    android:layout_weight="1"
+                    android:text="Action"
+                    android:textAppearance="?attr/textAppearanceTitleMedium" />
+            </LinearLayout>
+
+            <com.google.android.material.chip.ChipGroup
+                android:id="@+id/modeGroup"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
+                app:selectionRequired="true"
+                app:singleSelection="true">
+
+                <com.google.android.material.chip.Chip
+                    android:id="@+id/modeEncrypt"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:checkable="true"
+                    android:checked="true"
+                    android:text="Encrypt"
+                    app:checkedIconVisible="false"
+                    app:chipIcon="@drawable/ic_lock" />
+
+                <com.google.android.material.chip.Chip
+                    android:id="@+id/modeDecrypt"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:checkable="true"
+                    android:text="Decrypt"
+                    app:checkedIconVisible="false"
+                    app:chipIcon="@drawable/ic_lock_open" />
+
+                <com.google.android.material.chip.Chip
+                    android:id="@+id/modeVerify"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:checkable="true"
+                    android:text="Verify"
+                    app:checkedIconVisible="false"
+                    app:chipIcon="@drawable/ic_verified" />
+            </com.google.android.material.chip.ChipGroup>
+        </LinearLayout>
+    </com.google.android.material.card.MaterialCardView>
+
+    <com.google.android.material.card.MaterialCardView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="16dp"
+        app:cardBackgroundColor="@color/brand_surface"
+        app:cardCornerRadius="24dp"
+        app:cardElevation="0dp"
+        app:strokeColor="@color/brand_outline"
+        app:strokeWidth="1dp">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:padding="16dp">
+
+            <TextView
+                android:id="@+id/batchStatus"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Ready"
+                android:textAppearance="?attr/textAppearanceTitleSmall" />
+
+            <com.google.android.material.progressindicator.LinearProgressIndicator
+                android:id="@+id/batchProgress"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                app:indicatorColor="@color/brand_accent"
+                app:trackColor="@color/brand_outline"
+                app:trackThickness="6dp" />
+
+            <TextView
+                android:id="@+id/batchDetail"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:textAppearance="?attr/textAppearanceBodySmall"
+                android:textColor="?attr/colorOnSurfaceVariant" />
+        </LinearLayout>
+    </com.google.android.material.card.MaterialCardView>
+
+    <com.google.android.material.card.MaterialCardView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="12dp"
+        app:cardBackgroundColor="@color/brand_surface"
+        app:cardCornerRadius="24dp"
+        app:cardElevation="0dp"
+        app:strokeColor="@color/brand_outline"
+        app:strokeWidth="1dp">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:padding="16dp">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
+
+                <ImageView
+                    android:layout_width="22dp"
+                    android:layout_height="22dp"
+                    android:contentDescription="@null"
+                    android:src="@drawable/ic_photo_library"
+                    app:tint="@color/brand_accent" />
+
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="10dp"
+                    android:layout_weight="1"
+                    android:text="Queue"
+                    android:textAppearance="?attr/textAppearanceTitleMedium" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/clearQueueBtn"
+                    style="@style/Widget.Material3.Button.TextButton"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:contentDescription="Clear queue"
+                    app:icon="@drawable/ic_delete"
+                    app:iconGravity="textStart"
+                    app:iconPadding="0dp" />
+            </LinearLayout>
+
+            <TextView
+                android:id="@+id/queueView"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:ellipsize="end"
+                android:maxLines="4"
+                android:text="No files yet"
+                android:textAppearance="?attr/textAppearanceBodySmall"
+                android:textColor="?attr/colorOnSurfaceVariant" />
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
+                android:orientation="horizontal">
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/pickBtn"
+                    style="?attr/materialButtonOutlinedStyle"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_marginEnd="6dp"
+                    android:layout_weight="1"
+                    android:text="Images"
+                    app:icon="@drawable/ic_add"
+                    app:iconGravity="textStart" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/pickFolderBtn"
+                    style="?attr/materialButtonOutlinedStyle"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="6dp"
+                    android:layout_weight="1"
+                    android:text="Folder"
+                    app:icon="@drawable/ic_folder"
+                    app:iconGravity="textStart" />
+            </LinearLayout>
+        </LinearLayout>
+    </com.google.android.material.card.MaterialCardView>
+
+    <com.google.android.material.card.MaterialCardView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="12dp"
+        app:cardBackgroundColor="@color/brand_surface"
+        app:cardCornerRadius="24dp"
+        app:cardElevation="0dp"
+        app:strokeColor="@color/brand_outline"
+        app:strokeWidth="1dp">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:padding="16dp">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
+
+                <ImageView
+                    android:layout_width="22dp"
+                    android:layout_height="22dp"
+                    android:contentDescription="@null"
+                    android:src="@drawable/ic_key"
+                    app:tint="@color/brand_accent" />
+
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="10dp"
+                    android:layout_weight="1"
+                    android:text="Passphrase"
+                    android:textAppearance="?attr/textAppearanceTitleMedium" />
+            </LinearLayout>
+
+            <com.google.android.material.textfield.TextInputLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
+                android:hint="Passphrase"
+                app:endIconMode="password_toggle"
+                app:startIconDrawable="@drawable/ic_key">
+
+                <com.google.android.material.textfield.TextInputEditText
+                    android:id="@+id/pass"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:inputType="textPassword" />
+            </com.google.android.material.textfield.TextInputLayout>
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
+
+                <ImageView
+                    android:layout_width="18dp"
+                    android:layout_height="18dp"
+                    android:contentDescription="@null"
+                    android:src="@drawable/ic_tune"
+                    app:tint="@color/brand_muted" />
+
+                <TextView
+                    android:id="@+id/iterLabel"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="8dp"
+                    android:textAppearance="?attr/textAppearanceLabelMedium"
+                    android:textColor="?attr/colorOnSurfaceVariant" />
+            </LinearLayout>
+
+            <com.google.android.material.slider.Slider
+                android:id="@+id/iter"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:stepSize="10000"
+                android:value="200000"
+                android:valueFrom="10000"
+                android:valueTo="2000000" />
+        </LinearLayout>
+    </com.google.android.material.card.MaterialCardView>
+
+    <com.google.android.material.card.MaterialCardView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="12dp"
+        app:cardBackgroundColor="@color/brand_surface"
+        app:cardCornerRadius="24dp"
+        app:cardElevation="0dp"
+        app:strokeColor="@color/brand_outline"
+        app:strokeWidth="1dp">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:padding="16dp">
+
+            <ImageView
+                android:layout_width="22dp"
+                android:layout_height="22dp"
+                android:contentDescription="@null"
+                android:src="@drawable/ic_folder"
+                app:tint="@color/brand_accent" />
+
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="12dp"
+                android:layout_weight="1"
+                android:orientation="vertical">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Output"
+                    android:textAppearance="?attr/textAppearanceLabelSmall"
+                    android:textColor="?attr/colorOnSurfaceVariant" />
+
+                <TextView
+                    android:id="@+id/manualOutView"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:textAppearance="?attr/textAppearanceBodyMedium" />
+            </LinearLayout>
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/outputBtn"
+                style="@style/Widget.Material3.Button.TextButton"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Change" />
+        </LinearLayout>
+    </com.google.android.material.card.MaterialCardView>
+
+    
+
+    <com.google.android.material.button.MaterialButton
+        android:id="@+id/batchCheckBtn"
+        style="@style/Widget.Material3.Button.TextButton"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="4dp"
+        android:text="Test setup"
+        app:icon="@drawable/ic_bug"
+        app:iconGravity="textStart" />
+
+    <TextView
+        android:id="@+id/batchCheckStatus"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:textAppearance="?attr/textAppearanceBodySmall"
+        android:textColor="?attr/colorOnSurfaceVariant" />
+
+    <ImageView
+        android:id="@+id/preview"
+        android:layout_width="match_parent"
+        android:layout_height="220dp"
+        android:layout_marginTop="12dp"
+        android:adjustViewBounds="true"
+        android:contentDescription="@null"
+        android:scaleType="centerInside"
+        android:visibility="gone" />
+
+    <LinearLayout
+        android:id="@+id/results"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:orientation="vertical" />
 </LinearLayout>

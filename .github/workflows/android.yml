@@ -2,8 +2,9 @@ name: android
 
 # Build the Android APK (android/) and upload it as a workflow artifact.
 # On v* tags, also attach it to the GitHub Release (alongside the desktop
-# installers built by build.yml). Unsigned debug APK for sideloading/testing;
-# sign with your own keystore for store distribution.
+# installers built by build.yml). A stable signing key (repository secrets)
+# is required for in-app updates; without it the workflow falls back to a
+# debug-signed APK for sideloading/testing.
 
 on:
   push:
@@ -35,14 +36,28 @@ jobs:
       - name: Unit tests (crypto parity vs desktop golden vector)
         working-directory: android
         run: ./gradlew testDebugUnitTest --no-daemon
-      - name: Build debug APK
+      - name: Build APK (stable signing key enables in-app updates)
         working-directory: android
-        run: ./gradlew assembleDebug --no-daemon
-      - name: Rename APK for release
-        run: cp android/app/build/outputs/apk/debug/app-debug.apk OptiCipher-android.apk && ls -lh OptiCipher-android.apk
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          if [ -n "$ANDROID_KEYSTORE_BASE64" ]; then
+            echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.keystore"
+            export ANDROID_KEYSTORE_FILE="$RUNNER_TEMP/release.keystore"
+            ./gradlew assembleRelease --no-daemon
+            cp app/build/outputs/apk/release/app-release.apk ../OptiCipher-android.apk
+          else
+            echo "::warning::No ANDROID_KEYSTORE_BASE64 secret; building a debug-signed APK. In-app updates require a stable signing key."
+            ./gradlew assembleDebug --no-daemon
+            cp app/build/outputs/apk/debug/app-debug.apk ../OptiCipher-android.apk
+          fi
+          ls -lh ../OptiCipher-android.apk
       - uses: actions/upload-artifact@v4
         with:
-          name: OptiCipher-android-debug-apk
+          name: OptiCipher-android-apk
           path: OptiCipher-android.apk
       - name: Attach APK to GitHub Release (tags only)
         if: startsWith(github.ref, 'refs/tags/v')

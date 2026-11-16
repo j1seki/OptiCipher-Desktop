@@ -6,8 +6,9 @@
       - Card 2: Folder watch — **Encrypt** new files
       - Card 3: Folder watch — **Decrypt** new files
       - each with own folder, output, passphrase, interval, switch
-- [ ] 3. Folder access permissions (not just gallery/images)
-      - request media + all-files/folder access, with status dialog + settings links
+- [x] 3. Folder access permissions (not just gallery/images)
+      - use SAF per-folder grants (no all-files access), optional media/notification
+        prompts, with status dialog + settings links
 - [ ] 4. Folder watch: option to process **existing** images on start
       (not only files that appear later)
 - [ ] 5. Conflict policy when the output file already exists:
