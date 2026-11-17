@@ -12,6 +12,7 @@ import android.os.Bundle
 import android.provider.Settings
 import android.text.method.ScrollingMovementMethod
 import android.view.View
+import android.view.ViewGroup
 import android.view.WindowManager
 import android.widget.CompoundButton
 import android.widget.ImageView
@@ -28,6 +29,7 @@ import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
+import androidx.coordinatorlayout.widget.CoordinatorLayout
 import androidx.documentfile.provider.DocumentFile
 import com.google.android.material.appbar.MaterialToolbar
 import com.google.android.material.bottomnavigation.BottomNavigationView
@@ -87,6 +89,11 @@ class MainActivity : AppCompatActivity() {
                     pendingOutputMode = FolderWatcher.ENCRYPT
                     toast("Choose where encrypted images should be saved")
                     pickWatchOutput.launch(null)
+                } else if (FolderWatcher.isWatching(this, watchMode)) {
+                    // Changing a watched tree must not retain processed URIs
+                    // from the previous tree. Re-scan the newly selected inbox.
+                    FolderWatcher.resetProcessed(this, watchMode)
+                    FolderWatcher.enqueue(this, watchMode)
                 }
             } else {
                 if (onboardingStep == OnboardingStep.ENCRYPT_INPUT) {
@@ -103,6 +110,7 @@ class MainActivity : AppCompatActivity() {
             if (uri != null) {
                 takePersistable(uri); FolderWatcher.setOutputTree(this, watchMode, uri)
                 refreshWatch(watchMode); toast("Auto-$watchMode output folder chosen")
+                if (FolderWatcher.isWatching(this, watchMode)) FolderWatcher.enqueue(this, watchMode)
                 if (onboardingStep == OnboardingStep.ENCRYPT_OUTPUT && watchMode == FolderWatcher.ENCRYPT) completeFolderSetup()
             } else {
                 if (onboardingStep == OnboardingStep.ENCRYPT_OUTPUT) {
@@ -144,10 +152,8 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge(); setContentView(R.layout.activity_main)
-        ViewCompat.setOnApplyWindowInsetsListener(findViewById(R.id.root)) { view, insets ->
-            val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
-            view.setPadding(0, bars.top, 0, bars.bottom); insets
-        }
+        applyInsets()
+        migrateExistingWatchDefaults()
         passInput = findViewById(R.id.pass); iterSlider = findViewById(R.id.iter); iterLabel = findViewById(R.id.iterLabel)
         queueView = findViewById(R.id.queueView); startBtn = findViewById(R.id.startBtn)
         results = findViewById(R.id.results); preview = findViewById(R.id.preview); manualOutView = findViewById(R.id.manualOutView)
@@ -209,6 +215,48 @@ class MainActivity : AppCompatActivity() {
         nav.setOnItemSelectedListener { show(it.itemId); true }
         nav.setOnItemReselectedListener { if (it.itemId == R.id.nav_activity) refreshActivity() }
         nav.selectedItemId = R.id.nav_batch
+    }
+
+    /** Keep the bottom navigation and FAB above Android's gesture/navigation bar. */
+    private fun applyInsets() {
+        val root = findViewById<View>(R.id.root)
+        val nav = findViewById<BottomNavigationView>(R.id.bottomNav)
+        val content = findViewById<View>(R.id.contentFrame)
+        val fab = findViewById<View>(R.id.startBtn)
+        val density = resources.displayMetrics.density
+        val navBase = (96 * density).toInt()
+        val fabBase = (112 * density).toInt()
+        ViewCompat.setOnApplyWindowInsetsListener(root) { view, insets ->
+            val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
+            view.setPadding(0, 0, 0, 0)
+            (view.layoutParams as? CoordinatorLayout.LayoutParams)?.let { params ->
+                params.topMargin = bars.top
+                view.layoutParams = params
+            }
+            nav.setPadding(nav.paddingLeft, nav.paddingTop, nav.paddingRight, bars.bottom)
+            nav.layoutParams = nav.layoutParams.apply { height = navBase + bars.bottom }
+            content.layoutParams = (content.layoutParams as CoordinatorLayout.LayoutParams).apply {
+                bottomMargin = navBase + bars.bottom
+            }
+            fab.layoutParams = (fab.layoutParams as CoordinatorLayout.LayoutParams).apply {
+                bottomMargin = fabBase + bars.bottom
+            }
+            insets
+        }
+    }
+
+    /** v1.4.3: process existing inbox items by default, including upgraded installs. */
+    private fun migrateExistingWatchDefaults() {
+        val prefs = getSharedPreferences("folder_watch", Context.MODE_PRIVATE)
+        if (prefs.getInt("watch_schema", 0) < 3) {
+            prefs.edit()
+                .putBoolean("encrypt_process_existing", true)
+                .putBoolean("decrypt_process_existing", true)
+                .putInt("watch_schema", 3)
+                .apply()
+            FolderWatcher.resetProcessed(this, FolderWatcher.ENCRYPT)
+            FolderWatcher.resetProcessed(this, FolderWatcher.DECRYPT)
+        }
     }
 
     private fun refreshActivity() {
@@ -294,6 +342,7 @@ class MainActivity : AppCompatActivity() {
         }
         findViewById<MaterialButton>(i.scanNow).setOnClickListener {
             if (FolderWatcher.getInbox(this, watchMode) == null) { toast("Choose a folder first"); return@setOnClickListener }
+            if (FolderWatcher.processExisting(this, watchMode)) FolderWatcher.resetProcessed(this, watchMode)
             FolderWatcher.enqueue(this, watchMode)
             toast("Scan queued")
         }
@@ -331,13 +380,11 @@ class MainActivity : AppCompatActivity() {
             refreshWatch(watchMode)
             toast("Auto-$watchMode is on")
         }
-        if (!existing.isChecked) {
-            toast("Marking existing images as processed…")
-            Thread {
-                FolderWatcher.markExistingProcessed(this, watchMode)
-                runOnUiThread(begin)
-            }.start()
-        } else begin()
+        // Re-scan the selected inbox when enabling. The output conflict policy
+        // independently decides whether existing outputs are skipped or overwritten.
+        if (existing.isChecked) FolderWatcher.resetProcessed(this, watchMode)
+        else FolderWatcher.markExistingProcessed(this, watchMode)
+        begin()
     }
 
     /**
@@ -521,6 +568,7 @@ class MainActivity : AppCompatActivity() {
     private fun refreshQueue() {
         queueView.text = if (queue.isEmpty()) "No files yet" else "${queue.size} file(s) · " + queue.take(3).joinToString(", ") { it.lastPathSegment ?: "" } + if (queue.size > 3) " +${queue.size - 3}" else ""
         startBtn.text = actionLabel(); startBtn.isEnabled = queue.isNotEmpty()
+        startBtn.visibility = if (queue.isEmpty()) View.GONE else View.VISIBLE
     }
     private fun refreshOutputs() { manualOutView.text = manualOutputUri?.let(::folderLabel) ?: "App storage" }
 

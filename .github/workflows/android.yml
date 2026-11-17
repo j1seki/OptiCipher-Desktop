@@ -3,12 +3,11 @@ name: android
 # Build the Android APK (android/) and upload it as a workflow artifact.
 # On v* tags, also attach it to the GitHub Release (alongside the desktop
 # installers built by build.yml). A stable signing key (repository secrets)
-# is required for in-app updates; without it the workflow falls back to a
-# debug-signed APK for sideloading/testing.
+# is mandatory for tag releases so in-app updates can install over the app.
 
 on:
   push:
-    branches: [main, feat/google-photos-desktop-formats]
+    branches: [main]
     tags: ["v*"]
   pull_request:
   workflow_dispatch:
@@ -36,7 +35,7 @@ jobs:
       - name: Unit tests (crypto parity vs desktop golden vector)
         working-directory: android
         run: ./gradlew testDebugUnitTest --no-daemon
-      - name: Build APK (stable signing key enables in-app updates)
+      - name: Build APK (stable signing key required on releases)
         working-directory: android
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
@@ -44,13 +43,16 @@ jobs:
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
-          if [ -n "$ANDROID_KEYSTORE_BASE64" ]; then
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            test -n "$ANDROID_KEYSTORE_BASE64" || { echo "ANDROID_KEYSTORE_BASE64 secret is required for a release tag"; exit 1; }
+            test -n "$ANDROID_KEYSTORE_PASSWORD" || { echo "ANDROID_KEYSTORE_PASSWORD secret is required for a release tag"; exit 1; }
+            test -n "$ANDROID_KEY_ALIAS" || { echo "ANDROID_KEY_ALIAS secret is required for a release tag"; exit 1; }
+            test -n "$ANDROID_KEY_PASSWORD" || { echo "ANDROID_KEY_PASSWORD secret is required for a release tag"; exit 1; }
             echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.keystore"
             export ANDROID_KEYSTORE_FILE="$RUNNER_TEMP/release.keystore"
             ./gradlew assembleRelease --no-daemon
             cp app/build/outputs/apk/release/app-release.apk ../OptiCipher-android.apk
           else
-            echo "::warning::No ANDROID_KEYSTORE_BASE64 secret; building a debug-signed APK. In-app updates require a stable signing key."
             ./gradlew assembleDebug --no-daemon
             cp app/build/outputs/apk/debug/app-debug.apk ../OptiCipher-android.apk
           fi

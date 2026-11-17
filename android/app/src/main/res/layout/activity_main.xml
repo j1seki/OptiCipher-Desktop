@@ -22,9 +22,10 @@
     </com.google.android.material.appbar.AppBarLayout>
 
     <FrameLayout
+        android:id="@+id/contentFrame"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
-        android:layout_marginBottom="80dp"
+        android:layout_marginBottom="96dp"
         app:layout_behavior="@string/appbar_scrolling_view_behavior">
 
         <androidx.core.widget.NestedScrollView
@@ -66,7 +67,7 @@
         android:layout_height="wrap_content"
         android:layout_gravity="bottom|end"
         android:layout_marginEnd="16dp"
-        android:layout_marginBottom="96dp"
+        android:layout_marginBottom="112dp"
         android:text="Encrypt files"
         android:textColor="@color/brand_on_accent"
         app:backgroundTint="@color/brand_accent"
@@ -76,9 +77,12 @@
     <com.google.android.material.bottomnavigation.BottomNavigationView
         android:id="@+id/bottomNav"
         android:layout_width="match_parent"
-        android:layout_height="80dp"
+        android:layout_height="96dp"
         android:layout_gravity="bottom"
         android:background="@color/brand_surface"
+        app:itemHorizontalTranslationEnabled="false"
         app:labelVisibilityMode="labeled"
+        app:itemPaddingTop="4dp"
+        app:itemPaddingBottom="6dp"
         app:menu="@menu/main_nav" />
 </androidx.coordinatorlayout.widget.CoordinatorLayout>

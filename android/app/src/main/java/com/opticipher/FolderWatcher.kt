@@ -110,6 +110,9 @@ object FolderWatcher {
         saveProcessed(ctx, mode, processed)
     }
 
+    /** Clear previous scan results so "Include existing" really reprocesses the folder. */
+    fun resetProcessed(ctx: Context, mode: String) = saveProcessed(ctx, mode, emptySet())
+
     fun startWatching(ctx: Context, mode: String) {
         val inbox = getInbox(ctx, mode) ?: return
         prefs(ctx).edit().putBoolean(key(mode, WATCHING), true).apply()
@@ -140,7 +143,10 @@ object FolderWatcher {
     fun enqueue(ctx: Context, mode: String) {
         val request = OneTimeWorkRequestBuilder<WatchWorker>()
             .setInputData(Data.Builder().putString("mode", mode).build()).build()
-        WorkManager.getInstance(ctx).enqueueUniqueWork(nowWork(mode), ExistingWorkPolicy.REPLACE, request)
+        // REPLACE cancels an active large-photo encryption every time the
+        // foreground watcher polls. KEEP lets it finish; the next poll catches
+        // anything that arrived during the scan.
+        WorkManager.getInstance(ctx).enqueueUniqueWork(nowWork(mode), ExistingWorkPolicy.KEEP, request)
     }
 
     private fun processed(ctx: Context, mode: String): MutableSet<String> =

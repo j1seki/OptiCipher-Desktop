@@ -413,10 +413,11 @@ key:
 | `ANDROID_KEY_ALIAS` | key alias |
 | `ANDROID_KEY_PASSWORD` | key password |
 
-If `ANDROID_KEYSTORE_BASE64` is absent the workflow still builds a
-debug-signed APK, but in-app updates will reject it as a different signer.
+For pushes and pull requests without signing secrets, CI builds a debug APK.
+For `v*` release tags, the workflow **requires** the stable signing secrets
+and fails rather than publishing an APK that cannot update an existing install.
 Bump `versionCode` and `versionName` in `android/app/build.gradle` for each
-release.
+release. Configure the signing secrets before tagging a release.
 
 **What the app does:** two independent sections, matching the workflow:
 
