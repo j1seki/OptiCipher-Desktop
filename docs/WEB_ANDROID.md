@@ -59,15 +59,13 @@ uses the supported path:
    *Inbox* folder; the app keeps a **persistable URI permission** (survives
    reboot, no broad storage permission needed — this is why `MANAGE_EXTERNAL_STORAGE`
    / all-files access is deliberately avoided: Play policy would reject it).
-2. A **`ContentObserver`** on that tree queues new/changed files, plus a
-   lightweight **foreground watcher service** that checks at the selected
-   interval (**Instant / 15 min / 1 hour**). A **WorkManager periodic poll**
-   remains as a fallback when the service is not running.
+2. A foreground watcher service checks at the selected interval (15 minutes,
+   1, 6 or 12 hours, or daily). WorkManager provides a periodic fallback.
+   Android may delay checks; **Run now** queues a check while the watch is on.
 3. Each new PNG is checked for an existing **`OPTC` header** (by content, not
-   filename) so already-encrypted files are never re-encrypted; the output
-   folder is excluded to prevent loops.
-4. Outputs go to the chosen *output tree* (or app storage), **never
-   overwriting** (`_2`, `_3`…), matching desktop behaviour. Originals are
+   filename) so already-encrypted files are not re-encrypted.
+4. Outputs go to the chosen *output tree* (or app storage); the watch conflict
+   setting chooses whether to skip or overwrite an existing name. Originals are
    copied by default; "move originals" is an opt-in toggle.
 
 **Passphrase:** needed to process anything. Batch work can use an in-memory

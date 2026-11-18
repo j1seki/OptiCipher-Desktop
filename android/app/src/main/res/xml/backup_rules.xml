@@ -4,4 +4,5 @@
      be unusable (and EncryptedSharedPreferences can crash on a stale key). -->
 <full-backup-content>
     <exclude domain="sharedpref" path="." />
+    <exclude domain="file" path="private_outputs/" />
 </full-backup-content>

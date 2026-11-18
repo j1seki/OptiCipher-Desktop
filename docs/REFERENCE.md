@@ -1,0 +1,484 @@
+# OptiCipher technical reference
+
+## What "optical encryption" means here
+
+A normal cipher turns data into an opaque blob of bytes. OptiCipher instead keeps
+the output as a **valid image**. The encrypted file is a PNG you can open in any
+viewer; it simply shows visual noise. Two things are scrambled:
+
+| Stage | What it hides | Effect |
+|-------|---------------|--------|
+| **Scramble** (permutation) | *where* each colour is | destroys shapes, edges, text |
+| **Diffuse** (stream cipher) | *what* each colour is | flattens the histogram |
+
+Together they remove both the spatial structure and the colour statistics of the
+original, which is exactly what the standard "confusion + diffusion" principle of
+cipher design asks for.
+
+---
+
+## Is this idea new?
+
+**The building blocks are well established; the specific combination here is the
+interesting part.** Image-encryption research dates back to the 1990s. You will
+find extensive prior work on:
+
+- **Pixel permutation / scrambling** — Arnold's Cat Map, chaotic maps, etc.
+- **Value diffusion** — XOR with chaotic or cryptographic keystreams.
+- **Visual / perceptual encryption** — keeping the ciphertext as an image.
+- **LSB steganography and watermarking** — hiding data inside images.
+
+What OptiCipher emphasises, and what is comparatively uncommon in one tidy
+package, is being **fully self-contained and authenticated**:
+
+1. A modern, audited stream cipher (**ChaCha20**) for diffusion rather than a
+   home-rolled chaotic map.
+2. A **size-agnostic keyed permutation** (Fisher–Yates) that works for any
+   width × height — no square-image restriction like Arnold's Cat Map.
+3. All decryption metadata (salt, iterations, dimensions) embedded **inside the
+   image**, so there is no separate key file to manage.
+4. **HMAC-SHA256 integrity**, so a wrong passphrase or any tampering is detected
+   instead of silently producing garbage.
+
+So: not a new primitive, but a clean, documented, reproducible synthesis that is
+pleasant to study and to build on.
+
+---
+
+## How it works (the algorithm)
+
+```
+ENCRYPT
+                          passphrase
+                              │
+                  ┌───────────▼───────────┐
+   random salt ──►│  PBKDF2-HMAC-SHA256    │  (keys.py)
+                  └───────────┬───────────┘
+                              │  stream_key │ scramble_seed │ mac_key
+  original ─► SCRAMBLE positions ─► DIFFUSE values ─► HMAC ─► append header strip
+  (H×W×C)     (scramble.py)         (diffusion.py)   (core)   (stego.py)
+                                                                  │
+                                                                  ▼
+                                                  self-contained ciphertext PNG
+                                                       (H+strip rows × W × C)
+
+DECRYPT
+  ciphertext ─► read+parse header ─► re-derive keys ─► verify HMAC
+                (stego/header)        (keys.py)         (core.py)
+                              │ (fails fast on wrong passphrase / tampering)
+                              ▼
+             remove strip ─► UN-DIFFUSE ─► UN-SCRAMBLE ─► exact original
+```
+
+**Step by step:**
+
+1. **Key derivation (`keys.py`).** Your passphrase plus a fresh random 16-byte
+   salt are stretched by **PBKDF2-HMAC-SHA256** (default 200,000 iterations) into
+   64 bytes, split into three role-specific sub-keys: a 32-byte stream key, a
+   permutation seed, and a 16-byte MAC key. Same passphrase + salt ⇒ identical
+   keys, which is what makes decryption possible.
+
+2. **Scramble (`scramble.py`).** A keyed **Fisher–Yates** shuffle permutes pixel
+   *positions* (colours travel with their pixel). It works for any image shape
+   and is perfectly invertible.
+
+3. **Diffuse (`diffusion.py`).** Every colour byte is XOR-ed with a **ChaCha20**
+   keystream. Because each image gets a unique key (fresh salt), reusing a
+   constant-derived nonce is safe. XOR is its own inverse, so the same routine
+   encrypts and decrypts.
+
+4. **Authenticate + embed (`core.py`, `header.py`, `stego.py`).** An
+   **HMAC-SHA256** tag is computed over the header fields and the ciphertext
+   ("encrypt-then-MAC"). The header is then written into a small **reserved
+   strip** of extra pixel rows appended to the bottom of the image.
+
+Decryption reverses everything and refuses to proceed unless the HMAC verifies.
+
+---
+
+## The self-contained header
+
+Every encrypted image carries a 70-byte header in a thin appended strip:
+
+| Field | Size | Purpose |
+|-------|------|---------|
+| magic `OPTC` | 4 | identify an OptiCipher file |
+| version | 1 | format versioning |
+| salt | 16 | re-derive the keys |
+| iterations | 4 | PBKDF2 cost actually used |
+| height / width | 4 + 4 | original dimensions |
+| channels | 1 | 3 (RGB) or 4 (RGBA) |
+| strip_rows | 4 | how many rows to remove on decrypt |
+| HMAC-SHA256 | 32 | integrity / passphrase check |
+
+The salt and iteration count are **not secret** — exactly like the plaintext salt
+stored next to a password hash. All confidentiality comes from the passphrase.
+
+> **Why a reserved strip and not LSB steganography?** Hiding the header in the
+> least-significant bits of the ciphertext creates a self-referential sizing
+> paradox (the bits you overwrite are themselves ciphertext that must be restored
+> exactly). A dedicated strip sidesteps that entirely and guarantees a lossless
+> round trip. The trade-off is a few extra pixel rows — invisible in practice.
+
+---
+
+## Project layout
+
+```
+OptiCipher/
+├── opticipher/              # the library
+│   ├── __init__.py          # public API
+│   ├── __main__.py          # enables `python -m opticipher`
+│   ├── keys.py              # PBKDF2 key derivation
+│   ├── scramble.py          # keyed pixel permutation
+│   ├── diffusion.py         # ChaCha20 value diffusion
+│   ├── header.py            # binary header layout
+│   ├── stego.py             # reserved-strip storage
+│   ├── core.py              # encrypt/decrypt orchestration + HMAC
+│   ├── io_image.py          # PNG load/save helpers
+│   ├── metrics.py           # entropy, correlation, NPCR, UACI
+│   ├── cli.py               # command-line interface
+│   └── accel/               # (fork) compute backends — bit-exact layers
+│       ├── backend.py       # backend interface, settings, auto-calibration
+│       ├── cpu.py           # threaded ChaCha20 + int32 permutation
+│       └── gpu.py           # WebGPU/WGSL kernels + adapter discovery
+├── app/                     # (fork) PySide6 desktop application
+│   ├── main.py              # entry point (python -m app.main)
+│   ├── window.py            # main window: shell + pages + job wiring
+│   ├── theme.py             # design tokens, dark/light palettes, stylesheet
+│   ├── icons.py             # QPainter-drawn icon set (no dependency)
+│   ├── widgets.py           # reusable components (cards, buttons, fields…)
+│   ├── shell.py             # sidebar + header bar
+│   ├── imaging.py           # image metadata + preview widgets
+│   ├── history.py           # in-memory session activity log
+│   ├── pages/               # one module per screen
+│   │   ├── overview.py      # home screen + quick actions
+│   │   ├── crypt.py         # encrypt & decrypt screens
+│   │   ├── verify.py        # integrity verification screen
+│   │   ├── analyze.py       # research metrics screen
+│   │   ├── history_page.py  # session log
+│   │   ├── settings_page.py # compute/crypto/appearance settings
+│   │   └── about.py         # version, provenance, limits
+│   ├── workers.py           # QThread job, analysis and verification workers
+│   ├── settings.py          # QSettings persistence → accel config
+│   ├── device.py            # CPU/RAM/GPU introspection
+│   ├── sftp.py              # sftp:// output locations (paramiko, session-only creds)
+│   └── charts.py            # histogram & metric bar widgets
+├── packaging/               # (fork) PyInstaller spec, icons, entry
+├── web/                     # (fork) browser edition — GitHub Pages, 100% client-side
+│   ├── index.html, style.css, manifest.webmanifest
+│   ├── src/                 # pcg64.js, chacha20.js, core.js, png.js, app.js
+│   ├── tests/parity.test.js # Node parity tests vs desktop golden vector
+│   └── build.mjs            # esbuild bundle -> dist/ (Pages deploy target)
+├── android/                 # (fork) native Kotlin app -> APK
+│   └── app/src/main/java/com/opticipher/
+│       ├── Crypto.kt        # PCG64/ChaCha20/PBKDF2/HMAC core (parity-tested)
+│       ├── PngCodec.kt      # lossless PNG codec (java.util.zip)
+│       ├── MainActivity.kt  # encrypt/decrypt/verify UI + share intents
+│       ├── FolderWatcher.kt # SAF folder watch + WorkManager background jobs
+│       └── WatchService.kt  # foreground watcher for near-instant background checks
+├── .github/workflows/       # (fork) 3-OS CI build + smoke tests
+│   ├── build.yml            # desktop matrix + GitHub Release on v* tags
+│   ├── pages.yml            # web -> GitHub Pages
+│   └── android.yml          # Android unit tests + APK (+ Release asset on tags)
+├── tests/                   # pytest suite (run with `pytest`)
+│   ├── test_roundtrip.py
+│   ├── test_components.py
+│   ├── test_metrics_and_sample.py
+│   ├── test_accel.py            # (fork) CPU-backend parity vs reference
+│   ├── test_gpu_accel.py        # (fork) GPU golden-vector parity
+│   ├── test_integrity_matrix.py # (fork) MAC/tamper matrix, format rules
+│   ├── test_corruption.py       # (fork) hostile/corrupt file handling
+│   ├── test_file_safety.py      # (fork) atomic, non-destructive writes
+│   ├── test_compat_matrix.py    # (fork) per-format matrix + golden vector
+│   ├── test_sftp.py             # (fork) SFTP outputs against a fake transport
+│   ├── test_gui_smoke.py        # (fork) headless GUI wiring tests
+│   └── test_ui_design.py        # (fork) design system, shell, page behaviour
+├── samples/                 # the bundled "CLAUDE CODE" sample + outputs
+│   ├── sample_claude_code.png
+│   ├── sample_encrypted.png
+│   └── sample_decrypted.png
+├── examples/                # runnable demos
+│   ├── demo.py
+│   ├── benchmark.py
+│   └── benchmark_accel.py   # (fork) CPU-vs-GPU acceleration benchmark
+├── docs/                    # extra documentation
+│   ├── ALGORITHM.md
+│   ├── METRICS.md
+│   ├── FORMAT.md               # (fork) v1 format spec + guarantees matrix
+│   ├── BENCHMARKS.md        # (fork) acceleration benchmark report
+│   └── WEB_ANDROID.md       # (fork) web + Android editions: parity, hosting, folder watch
+├── pyproject.toml           # packaging / install metadata
+├── requirements.txt
+├── LICENSE                  # MIT
+├── CONTRIBUTING.md
+└── README.md
+```
+
+---
+
+## Installation
+
+Requires **Python 3.9+**.
+
+```bash
+git clone <this-repository>
+cd OptiCipher
+
+# Option A: library + CLI only
+pip install -e .
+
+# Option B: desktop app (adds PySide6 + wgpu)
+pip install -e ".[app]"
+
+# Option C: just install the dependencies and run in place
+pip install -r requirements.txt
+```
+
+Core dependencies are minimal and widely used: **NumPy**, **Pillow**,
+**cryptography**. Optional extras (see `pyproject.toml`): `.[dev]` (pytest),
+`.[gpu]` (WebGPU acceleration only), `.[app]` (GUI + WebGPU).
+
+Launch the desktop app with `python -m app.main`, or use the CLI exactly as
+upstream documents below — the two share the same library and the same
+bit-exact v1 file format.
+
+---
+
+## Quick start
+
+```bash
+# Encrypt (you'll be prompted for a passphrase, twice)
+opticipher encrypt samples/sample_claude_code.png encrypted.png
+
+# Decrypt
+opticipher decrypt encrypted.png recovered.png
+
+# See the statistics for any image
+opticipher metrics encrypted.png
+```
+
+Or run the guided demo:
+
+```bash
+python examples/demo.py
+```
+
+---
+
+## Command-line usage
+
+```
+opticipher encrypt  <input> <output> [--passphrase PASS] [--iterations N]
+opticipher decrypt  <input> <output> [--passphrase PASS]
+opticipher metrics  <input>
+```
+
+- Omit `--passphrase` to be prompted **securely** (no echo, no shell history).
+- `--iterations` lets you tune the PBKDF2 cost (default 200,000). The value is
+  stored in the image so decryption uses the same count automatically.
+- Output is always written as **lossless PNG** (a `.png` suffix is enforced),
+  because a lossy format like JPEG would destroy the ciphertext.
+
+---
+
+## Library usage
+
+```python
+import numpy as np
+from opticipher import load_image, save_image, encrypt_image, decrypt_image
+
+# Load any image as a uint8 (H, W, C) array
+img = load_image("photo.png")
+
+# Encrypt
+enc = encrypt_image(img, "my strong passphrase")
+save_image(enc, "photo_encrypted.png")
+
+# Decrypt (bit-exact)
+dec = decrypt_image(load_image("photo_encrypted.png"), "my strong passphrase")
+assert np.array_equal(img, dec)
+```
+
+A wrong passphrase or a tampered file raises `opticipher.DecryptionError`.
+
+---
+
+## Research metrics
+
+`opticipher.metrics` implements the standard image-encryption diagnostics so you
+can quantify quality rather than just eyeballing the noise. See
+[`docs/METRICS.md`](docs/METRICS.md) for the formulas and interpretation.
+
+| Metric | Function | Ideal for ciphertext |
+|--------|----------|----------------------|
+| Shannon entropy | `entropy_report` | ≈ 8.0 bits/byte |
+| Adjacent-pixel correlation | `adjacent_correlation` | ≈ 0 |
+| NPCR (pixel change rate) | `npcr` | ≈ 99.6 % |
+| UACI (intensity change) | `uaci` | ≈ 33.4 % |
+| Histogram | `histogram` | flat |
+
+---
+
+## Results on the bundled sample
+
+Measured on `samples/sample_claude_code.png` (322 × 620 RGB). Reproduce with
+`python examples/demo.py`.
+
+| Metric | Original | Encrypted | Ideal |
+|--------|---------:|----------:|------:|
+| Mean Shannon entropy (bits/byte) | 2.475 | **7.999** | 8.000 |
+| Correlation, horizontal (ch0) | 0.941 | **≈ 0.00** | 0 |
+| Correlation, vertical (ch0) | 0.923 | **≈ 0.02** | 0 |
+| Correlation, diagonal (ch0) | 0.870 | **≈ 0.01** | 0 |
+| NPCR (1-pixel change) | — | **≈ 99.6 %** | 99.6 % |
+| UACI (1-pixel change) | — | **≈ 33.5 %** | 33.4 % |
+| Round-trip | — | **bit-exact** | exact |
+
+Visually:
+
+| Original | Encrypted | Decrypted |
+|----------|-----------|-----------|
+| `sample_claude_code.png` | `sample_encrypted.png` (noise) | `sample_decrypted.png` (identical) |
+
+---
+
+## Threat model & security notes
+
+OptiCipher is an honest, well-documented **reference implementation**. Please read
+this section before trusting it with anything important.
+
+**What it provides**
+
+- **Confidentiality** of image content against someone without the passphrase,
+  via ChaCha20 diffusion keyed by PBKDF2.
+- **Integrity / authenticity** via HMAC-SHA256 (encrypt-then-MAC). Tampering or a
+  wrong passphrase is detected.
+- **Per-image uniqueness** via a fresh random salt, so identical plaintexts do
+  not produce identical ciphertexts.
+
+**Known limitations and honest caveats**
+
+- **PBKDF2 is memory-cheap**, so it is comparatively weak against GPU/ASIC
+  brute-force. For high-value secrets, a memory-hard KDF (Argon2id, scrypt) would
+  be stronger. PBKDF2 is used here to keep dependencies minimal and the code
+  readable; the iteration count is exposed and benchmarked.
+- The **permutation** is driven by NumPy's PRNG seeded from key material. It
+  provides spatial confusion and contributes to the statistics, but the
+  cryptographic confidentiality guarantee rests on **ChaCha20**, not on the
+  permutation alone.
+- The statistical metrics (entropy, correlation, NPCR, UACI) are **necessary but
+  not sufficient** indicators. Passing them does not constitute a security proof.
+- This project has **not** had a formal third-party cryptographic audit. Do not
+  use it as the sole protection for safety-critical or legally sensitive data.
+
+If you are a cryptographer or security researcher, contributions that harden or
+formally analyse the scheme are very welcome — see below.
+
+---
+
+## Running the tests
+
+```bash
+pip install -e ".[app,dev]"  # pytest + GUI/GPU test deps
+pytest -v
+```
+
+The suite (239 tests in this fork) covers each component in isolation, full
+encrypt→decrypt round trips across many image shapes (including RGBA and
+degenerate 1×N images), Unicode passphrases, wrong-passphrase rejection, tamper
+detection, and the statistical behaviour on the real sample image — plus the
+fork's parity layers:
+
+- `test_accel.py` — CPU backend byte-parity vs the reference (thread counts,
+  band/counter-seek edge cases, permutation identity, selection/fallback).
+- `test_gpu_accel.py` — GPU golden-vector keystream parity vs OpenSSL and exact
+  metric equality (auto-skips when no WebGPU adapter is present, e.g. CI).
+- `test_gui_smoke.py` — headless (offscreen) desktop-app wiring: window
+  construction, the navigation shell, per-page file lists, settings
+  (+ tooltips), the Encrypt page's KDF slider wiring, worker round-trip,
+  analysis report shape, original+ciphertext pair alignment for NPCR/UACI,
+  the preview/info panel, the click-to-enlarge viewer, per-channel histogram
+  colours, broad tooltip coverage and the batch failure summary.
+- `test_ui_design.py` — the redesigned interface: the token system (every
+  colour in the stylesheet must come from a palette token), WCAG AA contrast
+  in both themes, theme switching + persistence, the navigation shell and
+  its keyboard shortcuts, minimum window size, tooltip coverage of every
+  control, the encrypt→decrypt round trip through the new pages, the
+  step-by-step decryption outcome (a failed step must never read as
+  success), the four verification verdicts, and the session-history
+  bookkeeping.
+- `test_integrity_matrix.py` — encrypt-then-MAC verification against every
+  single-bit/field tamper, pinned format rules, and the no-oracle property
+  (wrong passphrase ≡ tamper in the error message).
+- `test_corruption.py` — garbage/truncated/hostile files, pre-auth resource
+  bounds (crafted iteration counts rejected in milliseconds, not hours).
+- `test_file_safety.py` — atomic writes, non-clobbering outputs, original
+  files untouched, failed-save recovery, unicode paths, batch reruns.
+- `test_compat_matrix.py` — the per-format compatibility matrix (PNG JPEG
+  BMP TIFF WebP-lossless GIF, L/P/CMYK/RGBA modes), metadata-loss pins,
+  ZIP/copy/rename transformations, JPEG-re-encode detection, and the v1
+  golden ciphertext vector.
+- `test_sftp.py` — SFTP URL parsing, `.part` staging + size verification,
+  rename fallback, mirror-upload semantics, credential hygiene (fake
+  transport; no network).
+
+Every encrypted file in these tests is checked for bit-exact compatibility with
+the upstream algorithm in both directions — the format promise is a test, not
+a hope.
+
+---
+
+## Benchmarking
+
+```bash
+python examples/benchmark.py        # upstream throughput baseline
+python examples/benchmark_accel.py  # fork: reference vs threaded CPU vs GPU
+```
+
+The upstream script prints encryption/decryption throughput across image
+sizes, the isolated PBKDF2 cost, and the full statistical suite, writing
+`examples/benchmark_results.json`.
+
+The fork's acceleration benchmark compares the reference, threaded-CPU and
+GPU backends on diffusion (4K/8K), metrics and end-to-end encrypt/decrypt,
+asserts bit-exactness while it measures, and writes
+[`docs/BENCHMARKS.md`](docs/BENCHMARKS.md) — including an honest section on
+where the GPU wins (histograms, weak CPUs) and where transfer overhead makes
+the CPU the better choice.
+
+---
+
+## Contributing
+
+**OptiCipher is open source and community contributions are warmly invited.**
+Whether you are a student, a security researcher, or just curious, there is room
+to help. See [`CONTRIBUTING.md`](CONTRIBUTING.md) for details. Good first issues
+include:
+
+- Adding **Argon2id** as an optional KDF.
+- Adding new **metrics** (e.g. χ² histogram uniformity test, local Shannon
+  entropy, key-sensitivity analysis).
+- A **GUI** or web front-end over the library. *(shipped in this fork: the
+  PySide6 desktop app — new front-end ideas still welcome)*
+- Performance work (vectorisation, optional native backend). *(WebGPU +
+  threaded CPU shipped in this fork; more ideas welcome)*
+- More **sample images** and reproducible metric reports.
+- Independent **security analysis** and write-ups.
+
+Please open an issue to discuss substantial changes first, keep the heavy
+commenting style consistent with the existing code, and add tests for new
+behaviour.
+
+---
+
+## License
+
+Released under the **MIT License** — you are free to use, modify, and
+redistribute it, including commercially, provided the copyright and licence
+notice are retained. See [`LICENSE`](LICENSE).
+
+Copyright © [bio-colab](https://github.com/bio-colab) and contributors
+(upstream OptiCipher). This Desktop fork preserves the MIT license and the
+upstream copyright notice; the added application, acceleration and packaging
+code is likewise MIT-licensed.

@@ -5,7 +5,7 @@
     android:layout_height="wrap_content"
     android:orientation="vertical"
     android:padding="16dp"
-    android:paddingBottom="112dp">
+    android:paddingBottom="72dp">
 
     <com.google.android.material.card.MaterialCardView
         android:layout_width="match_parent"
@@ -83,6 +83,14 @@
             </com.google.android.material.chip.ChipGroup>
         </LinearLayout>
     </com.google.android.material.card.MaterialCardView>
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="12dp"
+        android:text="Your image workspace"
+        android:textAppearance="?attr/textAppearanceHeadlineSmall"
+        android:textColor="@color/brand_on_surface" />
 
     <com.google.android.material.card.MaterialCardView
         android:layout_width="match_parent"
@@ -269,6 +277,13 @@
                     android:inputType="textPassword" />
             </com.google.android.material.textfield.TextInputLayout>
 
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/batchGenerate"
+                style="@style/Widget.Material3.Button.TextButton"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Generate strong passphrase" />
+
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
@@ -357,7 +372,26 @@
         </LinearLayout>
     </com.google.android.material.card.MaterialCardView>
 
-    
+    <com.google.android.material.materialswitch.MaterialSwitch
+        android:id="@+id/privateOutput"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Save to private folder"
+        android:contentDescription="Save batch outputs in app-private storage" />
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Other apps cannot directly read this folder. Files are removed on uninstall; export anything you want to keep."
+        android:textAppearance="?attr/textAppearanceBodySmall"
+        android:textColor="?attr/colorOnSurfaceVariant" />
+
+    <com.google.android.material.button.MaterialButton
+        android:id="@+id/privateFilesBtn"
+        style="@style/Widget.Material3.Button.TextButton"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Open private folder" />
 
     <com.google.android.material.button.MaterialButton
         android:id="@+id/batchCheckBtn"

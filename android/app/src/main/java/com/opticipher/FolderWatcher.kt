@@ -7,8 +7,6 @@ import android.database.ContentObserver
 import android.graphics.BitmapFactory
 import android.net.Uri
 import android.os.Build
-import android.os.Handler
-import android.os.Looper
 import android.provider.DocumentsContract
 import androidx.core.app.NotificationCompat
 import androidx.documentfile.provider.DocumentFile
@@ -41,7 +39,7 @@ object FolderWatcher {
     private const val REMEMBER = "remember"
     private const val MOVE = "move_original"
     private const val WATCHING = "watching"
-    private const val INTERVAL = "interval_minutes" // 0: ContentObserver only
+    private const val INTERVAL = "interval_minutes"
     private const val EXISTING = "process_existing"
     private const val CONFLICT = "conflict" // skip or overwrite; background cannot prompt
     private const val PROCESSED = "processed"
@@ -62,7 +60,29 @@ object FolderWatcher {
     fun setMoveOriginal(ctx: Context, mode: String, on: Boolean) = prefs(ctx).edit().putBoolean(key(mode, MOVE), on).apply()
     fun isMoveOriginal(ctx: Context, mode: String) = prefs(ctx).getBoolean(key(mode, MOVE), false)
     fun setIntervalMinutes(ctx: Context, mode: String, minutes: Int) = prefs(ctx).edit().putInt(key(mode, INTERVAL), minutes).apply()
-    fun getIntervalMinutes(ctx: Context, mode: String) = prefs(ctx).getInt(key(mode, INTERVAL), 15)
+    fun getIntervalMinutes(ctx: Context, mode: String) = prefs(ctx).getInt(key(mode, INTERVAL), 15).coerceAtLeast(15)
+    fun isWeekly(ctx: Context, mode: String) = prefs(ctx).getBoolean(key(mode, "weekly"), false)
+    fun setWeekly(ctx: Context, mode: String, day: Int, hour: Int, minute: Int) {
+        prefs(ctx).edit().putBoolean(key(mode, "weekly"), true).putInt(key(mode, "day"), day)
+            .putInt(key(mode, "hour"), hour).putInt(key(mode, "minute"), minute).apply()
+    }
+    fun setIntervalSchedule(ctx: Context, mode: String) = prefs(ctx).edit().putBoolean(key(mode, "weekly"), false).apply()
+    fun weeklyLabel(ctx: Context, mode: String): String {
+        val p = prefs(ctx)
+        val days = arrayOf("Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday")
+        return "Every ${days[(p.getInt(key(mode, "day"), 2) - 1).coerceIn(0, 6)]} at %02d:%02d".format(p.getInt(key(mode, "hour"), 9), p.getInt(key(mode, "minute"), 0))
+    }
+    private fun weeklyDelay(ctx: Context, mode: String): Long {
+        val p = prefs(ctx); val now = java.util.Calendar.getInstance()
+        val next = java.util.Calendar.getInstance().apply {
+            set(java.util.Calendar.DAY_OF_WEEK, p.getInt(key(mode, "day"), 2))
+            set(java.util.Calendar.HOUR_OF_DAY, p.getInt(key(mode, "hour"), 9))
+            set(java.util.Calendar.MINUTE, p.getInt(key(mode, "minute"), 0))
+            set(java.util.Calendar.SECOND, 0); set(java.util.Calendar.MILLISECOND, 0)
+        }
+        if (next.timeInMillis <= now.timeInMillis) next.add(java.util.Calendar.WEEK_OF_YEAR, 1)
+        return next.timeInMillis - now.timeInMillis
+    }
     fun setProcessExisting(ctx: Context, mode: String, on: Boolean) = prefs(ctx).edit().putBoolean(key(mode, EXISTING), on).apply()
     fun processExisting(ctx: Context, mode: String) = prefs(ctx).getBoolean(key(mode, EXISTING), true)
     fun setConflictPolicy(ctx: Context, mode: String, policy: String) = prefs(ctx).edit().putString(key(mode, CONFLICT), policy).apply()
@@ -114,23 +134,20 @@ object FolderWatcher {
     fun resetProcessed(ctx: Context, mode: String) = saveProcessed(ctx, mode, emptySet())
 
     fun startWatching(ctx: Context, mode: String) {
-        val inbox = getInbox(ctx, mode) ?: return
+        if (getInbox(ctx, mode) == null) return
         prefs(ctx).edit().putBoolean(key(mode, WATCHING), true).apply()
         stopWatching(ctx, mode, keepFlag = true)
         val app = ctx.applicationContext
-        val observer = object : ContentObserver(Handler(Looper.getMainLooper())) {
-            override fun onChange(selfChange: Boolean) = enqueue(app, mode)
-        }
-        observers[mode] = observer
-        try { app.contentResolver.registerContentObserver(inbox, true, observer) } catch (_: Exception) { }
-        enqueue(app, mode)
+        // Scheduled watches must not bypass their interval on provider changes.
+        if (!isWeekly(app, mode)) enqueue(app, mode)
         // Android's minimum periodic interval is 15 minutes. Always keep a
         // background fallback so watching survives the app process being killed.
-        val interval = getIntervalMinutes(app, mode).coerceAtLeast(15)
-        val request = PeriodicWorkRequestBuilder<WatchWorker>(interval.toLong(), TimeUnit.MINUTES)
+        val interval = if (isWeekly(app, mode)) 7L * 24 * 60 else getIntervalMinutes(app, mode).toLong()
+        val builder = PeriodicWorkRequestBuilder<WatchWorker>(interval, TimeUnit.MINUTES)
             .setInputData(Data.Builder().putString("mode", mode).build())
-            .build()
-        WorkManager.getInstance(app).enqueueUniquePeriodicWork(work(mode), ExistingPeriodicWorkPolicy.UPDATE, request)
+        if (isWeekly(app, mode)) builder.setInitialDelay(weeklyDelay(app, mode), TimeUnit.MILLISECONDS)
+        val request = builder.build()
+        WorkManager.getInstance(app).enqueueUniquePeriodicWork(work(mode), ExistingPeriodicWorkPolicy.CANCEL_AND_REENQUEUE, request)
     }
 
     fun stopWatching(ctx: Context, mode: String, keepFlag: Boolean = false) {
@@ -147,6 +164,17 @@ object FolderWatcher {
         // foreground watcher polls. KEEP lets it finish; the next poll catches
         // anything that arrived during the scan.
         WorkManager.getInstance(ctx).enqueueUniqueWork(nowWork(mode), ExistingWorkPolicy.KEEP, request)
+    }
+
+    fun progress(ctx: Context, mode: String, text: String, current: Int, total: Int, done: Boolean = false) {
+        prefs(ctx).edit().putString("${mode}_live", text).apply()
+        val manager = ctx.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        manager.createNotificationChannel(NotificationChannel("watch_progress", "Watch progress", NotificationManager.IMPORTANCE_LOW))
+        val note = NotificationCompat.Builder(ctx, "watch_progress").setSmallIcon(R.drawable.ic_shield)
+            .setContentTitle("Auto-$mode").setContentText(text).setOnlyAlertOnce(true)
+            .setOngoing(!done).setAutoCancel(done)
+            .setProgress(if (done) 0 else total.coerceAtLeast(1), if (done) 0 else current, !done && total == 0).build()
+        try { manager.notify(if (mode == ENCRYPT) 84 else 85, note) } catch (_: SecurityException) { }
     }
 
     private fun processed(ctx: Context, mode: String): MutableSet<String> =
@@ -199,11 +227,15 @@ class WatchWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx,
             var written = 0
             var eligible = 0
             FolderWatcher.log(applicationContext, "Auto-$mode scan started (output: ${outTree?.uri?.lastPathSegment ?: "app storage"})")
-            for (source in inbox.listFiles()) {
+            val sources = inbox.listFiles().filter { it.isFile && it.uri.toString() !in processed &&
+                if (mode == FolderWatcher.ENCRYPT) ImageFormats.isSupported(it.name) else it.name?.lowercase()?.endsWith(".png") == true }
+            FolderWatcher.progress(applicationContext, mode, "Checking ${sources.size} files", 0, sources.size)
+            for ((index, source) in sources.withIndex()) {
                 if (!source.isFile || source.uri.toString() in processed) continue
                 // Ciphertext is always PNG. Encrypt, however, accepts the same
                 // common camera/image formats as the manual batch screen.
                 val inputName = source.name ?: continue
+                FolderWatcher.progress(applicationContext, mode, "Processing ${index + 1}/${sources.size} · $inputName", index, sources.size)
                 if (mode == FolderWatcher.ENCRYPT && !ImageFormats.isSupported(inputName)) continue
                 if (mode == FolderWatcher.DECRYPT && !inputName.lowercase().endsWith(".png")) continue
                 eligible++
@@ -238,11 +270,13 @@ class WatchWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx,
             }
             applicationContext.getSharedPreferences("folder_watch", Context.MODE_PRIVATE).edit()
                 .putStringSet("${mode}_processed", processed).apply()
+            FolderWatcher.progress(applicationContext, mode, "Complete · $written written, $eligible checked", sources.size, sources.size, true)
             if (written > 0) FolderWatcher.notify(applicationContext, "OptiCipher: $written file(s) ${mode}ed by folder watch")
             else if (eligible > 0) FolderWatcher.notify(applicationContext, "OptiCipher: no $mode output written — files may already exist or be unreadable")
             else FolderWatcher.log(applicationContext, "Auto-$mode scan finished — no eligible files")
             Result.success()
         } catch (exception: Exception) {
+            FolderWatcher.progress(applicationContext, mode, "Failed · ${exception.message}", 0, 0, true)
             FolderWatcher.notify(applicationContext, "OptiCipher: $mode watch failed — ${exception.message}")
             Result.success()
         }

@@ -1,993 +1,117 @@
 # OptiCipher
 
-> **This repository is the OptiCipher Desktop fork** — a cross-platform desktop
-> app and hardware-accelerated build of [bio-colab/OptiCipher](https://github.com/bio-colab/OptiCipher)
-> (MIT). The encryption algorithm, file format and CLI are unchanged: encrypted
-> PNGs are **bit-for-bit interchangeable** with the original tool in both
-> directions, proven by a test suite that pins every compute backend to the
-> reference bytes. See [OptiCipher Desktop](#opticipher-desktop-this-fork) below.
+### Your images, transformed into authenticated PNGs.
 
-**Open-source optical (perceptual) image encryption — for research and education.**
+OptiCipher is an open-source image-encryption research project for **desktop, Android and the web**. Encrypt a picture into a viewable noise-like PNG, verify it has not been modified, and restore its pixels with the passphrase. Processing happens on your device; the image and passphrase are not uploaded by the encryption workflow.
 
-OptiCipher turns an image into a real, viewable PNG that *looks* like pure noise,
-yet still contains every bit of the original. Pixels are spatially **scrambled**
-and their colour values are **diffused** with a stream cipher. Everything needed
-to decrypt (except your passphrase) is embedded **inside the image itself**, so a
-single PNG is fully self-contained. Decryption is **bit-exact**: you get back the
-original image, pixel for pixel.
+> **Research and education software, not an audited vault.** Do not rely on this as the sole protection for sensitive data. PBKDF2 is memory-cheap, and image statistics are not proof of security. See [security](#security-and-limitations).
 
-> **Status:** research / educational reference implementation. Read
-> [Threat model & security notes](#threat-model--security-notes) before using it
-> to protect anything that genuinely matters.
+[Get desktop & Android releases](https://github.com/j1seki/OptiCipher-Desktop/releases) · [Technical reference](docs/REFERENCE.md) · [Format specification](docs/FORMAT.md) · [Web & Android notes](docs/WEB_ANDROID.md)
 
----
+## Meet OptiCipher
 
-## OptiCipher Desktop (this fork)
+| | Desktop | Android APK | Web |
+|---|---|---|---|
+| **Encrypt / decrypt** | Batch images, previews, optional SFTP copy | Batch queue and sharing | Locally in the browser |
+| **Verify** | Authenticate without restoring | Verify queued images | Authenticate or inspect format |
+| **Explore** | Entropy, correlation, NPCR/UACI and histograms | Folder watch and activity log | Image statistics |
+| **Run** | Linux, macOS, Windows | Native Kotlin app | Static site, no server required |
 
-A PySide6 desktop app over the same library, with pluggable hardware
-acceleration and per-OS installers.
+Ciphertexts use the same v1 format across editions. Save and transfer encrypted images as **lossless PNG**; lossy conversion destroys the ciphertext.
 
-### What's new in v1.4.0 — web & Android editions
+### See it in action
 
-Two new editions of the same v1 format, both **100% client-side and
-bit-for-bit compatible** with the desktop app (a ciphertext from any edition
-decrypts in all of them):
+Screenshot slideshows, not recordings of live interactions:
 
-- **Web (`web/`)** — a browser app hosted on **GitHub Pages**: Encrypt,
-  Decrypt, Verify and Analyze, entirely in the browser tab. The Python core
-  is re-implemented in JS (WebCrypto PBKDF2/HMAC, pure-JS ChaCha20, and an
-  exact NumPy SeedSequence/PCG64 port for the pixel scramble) with a
-  lossless PNG codec — files are processed locally and never uploaded.
-- **Android (`android/`)** — a native Kotlin app distributed as an **APK**,
-  with **SAF-based folder watching** for auto encrypt/decrypt, a lightweight
-  foreground watcher service plus WorkManager fallback for background
-  processing, and the correct scoped-storage permission flows.
-  Its crypto core is unit-tested against a ciphertext produced by this
-  desktop build.
-
-See [Web & Android editions](#web--android-editions) below and
-[`docs/WEB_ANDROID.md`](docs/WEB_ANDROID.md).
-
-### What's new in v1.3.0 — the interface rebuild
-
-The desktop app was redesigned from the ground up around a token-driven
-design system. No backend behaviour changed: the file format, the CLI, the
-atomic writes and the SFTP outputs are exactly as they were.
-
-- **A real application shell** — a navigation sidebar (with a wordmark,
-  icons and a live device summary) around eight screens, instead of three
-  bare tabs.
-- **Eight screens, all backed by real functionality** — Overview, Encrypt,
-  Decrypt, Verify integrity, Analyze, History, Settings, About. No
-  placeholder pages.
-- **A proper design system** — every colour, radius and spacing value is a
-  token in one place; a **dark theme (default) and a light theme**, both
-  remembered between runs, restyle the whole application at once. No widget
-  carries an inline stylesheet.
-- **Honest state** — decryption reports *authentication*, *output written*
-  and *exact restoration* as three separate rows, so a partially failed run
-  can never read as a green "done".
-- **A new integrity-verification screen** — check a ciphertext's HMAC-SHA256
-  tag without restoring it, with the six verdicts the backend can actually
-  produce and the technical details behind them.
-- **Accessibility** — `Alt+1`…`Alt+8` navigation, accessible names, a
-  tooltip on every control, readable secondary text, and a 960×620 minimum
-  window size.
-- **239 tests** (up from 208), green on Linux, macOS and Windows.
-
-### Screenshots
-
-Real captures from the running app (regenerate with
-`python packaging/screenshots.py`).
-
-**Overview** — the home screen: quick actions, what this machine can do, and
-what has happened in this session:
-
-![OptiCipher Desktop — Overview](docs/screenshots/overview.png)
-
-**Encrypt** — sample loaded, encryption finished, before/after preview and
-the KDF cost control:
-
-![OptiCipher Desktop — Encrypt](docs/screenshots/encrypt.png)
-
-**Decrypt** — a real decryption, reported step by step (authentication tag
-verified → output written → exact restoration) instead of one blanket
-"success":
-
-![OptiCipher Desktop — Decrypt](docs/screenshots/decrypt.png)
-
-**Verify integrity** — the authentication check for a ciphertext, with the
-technical details it was based on:
-
-![OptiCipher Desktop — Verify integrity](docs/screenshots/verify.png)
-
-**Analyze** — entropy, adjacent-pixel correlation, NPCR/UACI and the
-per-channel histogram for an original/ciphertext pair:
-
-![OptiCipher Desktop — Analyze](docs/screenshots/analyze.png)
-
-**Settings** — compute device, threads, RAM budget, PBKDF2 cost, theme, and
-what this machine offers:
-
-![OptiCipher Desktop — Settings](docs/screenshots/settings.png)
-
-### The interface
-
-The application is a sidebar shell around eight real screens — no
-placeholder pages, and no feature that is only a label:
-
-| Screen | What it does |
+| Desktop | Android APK |
 |---|---|
-| **Overview** | quick actions, the live compute backend and its limits, and the session's activity |
-| **Encrypt** | batch encrypt with drag-and-drop, passphrase + confirmation, KDF cost, destination, live preview |
-| **Decrypt** | the same shape, plus a step-by-step outcome (authentication → write → exact restoration) |
-| **Verify** | read-only integrity check of a ciphertext, with the verdict and the technical details behind it |
-| **Analyze** | entropy, H/V/D adjacent correlation, NPCR/UACI, 256-bin per-channel histograms |
-| **History** | what happened in this session — in memory only, never written to disk |
-| **Settings** | compute device, threads, RAM budget, PBKDF2 cost, theme |
-| **About** | version, provenance, and the honest limits of the tool |
+| ![Desktop interface slideshow](docs/media/desktop.gif) | ![Android interface slideshow](docs/media/android.gif) |
 
-Design system notes:
+## Get started
 
-- **One token set, two themes.** Every colour, radius and spacing value
-  lives in `app/theme.py`; the dark theme is the default and a light theme
-  is one palette away. The choice is remembered between runs.
-- **No inline stylesheets.** Components declare a *role* (an `objectName`)
-  and the generated stylesheet styles that role, so a component restyles
-  everywhere at once.
-- **No icon dependency.** The ~30 glyphs are drawn with `QPainter`
-  (`app/icons.py`) — crisp at any DPI, recoloured per theme, nothing extra
-  to vendor into the packaged build.
-- **Keyboard reachable.** `Alt+1`…`Alt+8` switch screens, every control has
-  an accessible name, and every control has a tooltip.
-- **Honest state.** A decryption only claims success when the
-  authentication tag verified *and* the output was written *and* the
-  restoration was exact — three separate rows. Verification without a
-  passphrase says "not authenticated" rather than "verified".
+### Desktop
 
-### What the desktop app adds
-
-| Feature | Details |
-|---|---|
-| **Encrypt / Decrypt / Verify / Analyze** | drag-and-drop, batch queues, before/after preview |
-| **Metrics dashboard** | entropy, H/V/D adjacent correlation, NPCR/UACI, 256-bin histograms |
-| **Read-only integrity check** | verifies a ciphertext's HMAC-SHA256 tag without restoring it, and distinguishes "wrong passphrase or modified", "malformed", "unsupported format" and "not authenticated" |
-| **Compute device picker** | Auto / GPU / CPU, CPU thread count, RAM budget — Auto runs a one-time per-machine calibration and picks the faster backend |
-| **KDF cost slider** | PBKDF2 iterations (the format-legal cost knob; higher = slower brute-force, slower encrypt) |
-| **Background jobs** | every job runs on a worker thread with progress + cancel; the UI never blocks |
-| **Device info panel** | shows the exact GPU adapter and API in use (Metal / Vulkan / DX12) |
-| **SFTP output locations** | type `sftp://user@host[:port]/path` in the Output field and every result is also uploaded there as a size-verified copy; passwords are asked once per session and never saved to disk |
-| **Safe writes** | outputs are written atomically (temp → fsync → rename) and never overwrite an existing file — a numbered name (`_2`) is chosen instead; batch failures surface as one summary dialog, not one per file |
-| **Dark & light themes** | one token set, two palettes, remembered between runs; no white flash when switching |
-| **Session history** | a short, in-memory log of what you did — deliberately not persisted |
-
-### Hardware acceleration, without breaking the format
-
-`opticipher/accel/` adds compute backends under the unchanged public API:
-
-- **CPU backend** — multi-core ChaCha20 (band-split with exact counter-seek so
-  the keystream is *identical* to the single-context reference) and RAM-budget
-  band sizing.
-- **GPU backend** — WebGPU via `wgpu` (WGSL compute shaders): Metal on macOS
-  (incl. Apple Silicon), Vulkan on Linux, DX12/Vulkan on Windows. ChaCha20
-  full blocks on the GPU, tail via the reference cipher; histogram / NPCR /
-  UACI kernels for the Analyze tab. No CUDA toolkit needed — `wgpu` ships its
-  own native binaries in its wheels.
-- **Automatic CPU fallback** — no GPU, no Vulkan, or a driver problem? Every
-  job still runs, on the CPU backend, with the reason shown in the UI.
-
-**The hard rule, enforced by tests:** every backend must produce
-byte-identical output to the upstream reference implementation.
-`tests/test_accel.py` + `tests/test_gpu_accel.py` pin the keystream against
-OpenSSL golden vectors across block boundaries and sizes — any single-byte
-drift fails CI before it can touch a user's file. Measured numbers and their
-honest interpretation live in [docs/BENCHMARKS.md](docs/BENCHMARKS.md).
-
-### Integrity & file-safety guarantees
-
-The reliability audit (phases 1–13) turned every promise into an executable
-test. The full, normative specification — header layout, authenticated
-regions, reader obligations, error semantics, the format-compatibility
-matrix and a golden test vector that pins the v1 ciphertext bytes — is
-[docs/FORMAT.md](docs/FORMAT.md). The headline rules:
-
-- **Encrypt-then-MAC, verified before output.** HMAC-SHA256 covers every
-  header field and every payload byte; decryption refuses to produce pixels
-  that failed the check, and a wrong passphrase and a tampered file are
-  deliberately indistinguishable (no password oracle).
-- **No unbounded pre-auth work.** A crafted header cannot force hours of
-  PBKDF2: iteration counts, dimensions and strip geometry are bounds-checked
-  *before* key derivation (`tests/test_corruption.py`).
-- **Pixel-exact, not byte-exact.** Restored pixels equal the original
-  decode; the restored *file* is a fresh PNG (EXIF/ICC/palette are not
-  preserved — `tests/test_compat_matrix.py` pins this per format, including
-  that a JPEG re-encode of ciphertext is **detected**, never silently
-  accepted).
-- **Atomic, non-destructive saves.** Temp file → fsync → rename; existing
-  files are never clobbered; a failed save leaves the previous file intact
-  and no partial output (`tests/test_file_safety.py`).
-
-### Installation (desktop app)
-
-**Option A — download a release build (no Python required).**
-
-Grab the artifact for your OS from
-[Releases](https://github.com/j1seki/OptiCipher-Desktop/releases):
-
-| OS | Artifact | Notes |
-|---|---|---|
-| **Linux** | `OptiCipherDesktop-linux-x64.tar.gz` or `.AppImage` | tar.gz needs the distro's usual GL/glib runtime libraries (table below); the AppImage is self-contained (needs FUSE, or run `./…AppImage --appimage-extract`) |
-| **macOS** (Apple Silicon) | `…-macos-arm64.dmg` | unsigned build — right-click the app → **Open** on first launch to bypass Gatekeeper |
-| **Windows** | `…-windows-x64.zip` | unzip and run `OptiCipherDesktop.exe` |
-
-Linux: builds are produced on **Ubuntu 22.04 (glibc 2.35)**, so they start on
-every current distribution — Arch/CachyOS, Debian 12+, Ubuntu 22.04+, Fedora,
-and derivatives. The GUI needs the standard desktop runtime libraries:
-
-| Distro | Install command |
-|---|---|
-| Debian / Ubuntu / Linux Mint | `sudo apt install libegl1 libgl1 libglib2.0-0 libxkbcommon0 libdbus-1-3 libfontconfig1` |
-| Arch / CachyOS / Manjaro | `sudo pacman -S mesa libglvnd glib2 libxkbcommon dbus fontconfig` |
-| Fedora | `sudo dnf install mesa-libEGL mesa-libGL glib2 libxkbcommon dbus-libs fontconfig` |
-
-```bash
-tar -xzf OptiCipherDesktop-linux-x64.tar.gz
-./OptiCipherDesktop/OptiCipherDesktop
-```
-
-This is tested, not assumed: every CI push runs the packaged binary
-headlessly in **Ubuntu 22.04 & 24.04, Debian 12 & 13, Arch and Fedora**
-containers before the artifact is uploaded.
-
-**Where releases come from:** pushing a version tag (`git tag v1.0.0 && git
-push origin v1.0.0`) runs the full build + distro-test matrix and then
-publishes everything as a [GitHub Release](https://github.com/j1seki/OptiCipher-Desktop/releases)
-automatically. (The per-run *Actions artifacts* expire after 90 days — always
-download from the Releases page.)
-
-**Option B — install from source (Python 3.9+).**
+Download the appropriate package from [Releases](https://github.com/j1seki/OptiCipher-Desktop/releases), or run from source with Python 3.9+:
 
 ```bash
 git clone https://github.com/j1seki/OptiCipher-Desktop.git
 cd OptiCipher-Desktop
-python -m venv .venv && source .venv/bin/activate
-pip install -e ".[app]"      # library + PySide6 + wgpu
-python -m app.main           # launch the desktop app
+python -m venv .venv
+source .venv/bin/activate  # Windows: .venv\Scripts\activate
+pip install -e ".[app]"
+python -m app.main
 ```
 
-Extras: `.[dev]` (tests), `.[gpu]` (wgpu only, no GUI), `.[app]` (GUI + wgpu).
+Choose **Encrypt**, add images, enter and confirm a passphrase, select an output destination and start. Use **Decrypt** with the same passphrase to restore pixels. Desktop also supports CPU / optional WebGPU acceleration and optional SFTP output copies.
 
-**Option C — library & CLI only.**
+### Android
 
-```bash
-pip install -e .
-```
+Install `OptiCipher-android.apk` from [Releases](https://github.com/j1seki/OptiCipher-Desktop/releases). In **Batch**, choose an action and images, set a passphrase and destination, and start the queue. **Folder watch** configures independent encrypt and decrypt inboxes using Android's system folder picker.
 
-**Build the package yourself.**
+Folder watches offer recurring checks every **15 minutes, 1 hour, 6 hours, 12 hours or daily**, or a **weekly weekday and time**, plus **Run now** to queue a check while the watch is enabled. Interval watches queue an initial check; weekly watches wait for their scheduled time unless you choose Run now. Android can delay background work; neither a schedule nor Run now promises exact timing. Background watches require the separate remembered watch passphrase, stored using Android Keystore-backed encrypted preferences. The existing conflict policy controls whether outputs are skipped or overwritten.
 
-```bash
-pip install pyinstaller
-pyinstaller packaging/opticipher-desktop.spec --noconfirm
-./dist/OptiCipherDesktop/OptiCipherDesktop --smoke   # headless check
-```
+Progress is reported per file in the app and notifications; a large image has no finer-grained progress indicator. Passphrase fields include an optional secure random generator; save generated passphrases somewhere safe.
 
-### How to use the desktop app
+**Optional private folder:** enable **Save to private folder** for batch outputs, or choose **OptiCipher private** in Android's system Files picker as an input or output folder, including for folder watches. The provider uses internal app storage and supports directories. Other apps can access items you explicitly grant through the picker; shared copies are no longer private. Like the storage concept in [Aer](https://github.com/nain-F49FF806/anemo-aer), this is separate app storage, but it does **not** implement Aer's lock, auto-lock, or secondary storage options. It is not an encrypted or password-locked vault and does not protect originals, exports, compromised devices, or privileged access. Files are excluded from backup and **deleted when the app is uninstalled**; export them first.
 
-**Encrypt**
-
-1. Open the **Encrypt** tab and add files or whole folders (*Add files…* /
-   *Add folder…*, or drag-and-drop into the list).
-2. Type a passphrase and repeat it in the confirmation box.
-3. Optionally adjust the **KDF cost** slider — higher costs more to encrypt
-   and far more to attack; 200,000 iterations is the default.
-4. Optionally pick an **Output** folder; empty means "next to the input",
-   writing `<name>_encrypted.png`. You can also type an SFTP location
-   (`sftp://user@server.example.com/remote/dir`) — a login dialog asks for
-   the password once per session (kept in memory only, never written to
-   settings or disk), and each result is uploaded there as a verified copy
-   while the local file is kept.
-5. Press **Start**. The progress bar and the *before → after* preview update
-   live; the status bar reports how many files succeeded.
-
-**Decrypt**
-
-1. Switch to **Decrypt** and add the encrypted PNGs.
-2. Enter the passphrase (one box — decryption is verified, not guessed).
-3. Press **Start** — the original is recovered next to the ciphertext as
-   `<name>_decrypted.png`. A wrong passphrase or a tampered file is detected
-   via HMAC and reported per file; you never get silent garbage.
-
-**Analyze**
-
-1. Go to the **Analyze** tab.
-2. Add **one** image for entropy, adjacent-pixel correlation and the 256-bin
-   histogram…
-3. …or add an image **and its OptiCipher ciphertext** (the app aligns the
-   reserved header strip automatically) to also get **NPCR** and **UACI**.
-4. Press **Run analysis** — results render as metric bars, a correlation
-   table and a selectable per-channel histogram; the status bar names the
-   compute backend that ran it.
-
-**Preview & info panel**
-
-- The file selected in any tab shows in the **before** preview immediately —
-  as soon as it is added, before any job runs — so you can confirm the right
-  image was chosen.
-- Below the previews, the **info panel** lists the file's name, format,
-  colour mode, resolution, size, and whether it carries an OptiCipher
-  ciphertext header (with the original dimensions, PBKDF2 cost and strip
-  size stored in it).
-- **Click any preview to enlarge** it in a scrollable full-size viewer
-  (Esc closes).
-- Every technical control (KDF cost, compute device, threads, RAM budget,
-  PBKDF2 iterations) has a **tooltip** explaining what it does on hover.
-
-**Settings & the device bar**
-
-- *Settings → Compute device*: **Auto** (a one-time per-machine calibration
-  picks the faster of CPU/GPU), **GPU** (WebGPU — Metal on macOS, Vulkan on
-  Linux, DX12/Vulkan on Windows) or **CPU**; plus CPU thread count, RAM
-  budget and the default PBKDF2 cost.
-- The bottom **device bar** always shows what actually ran: adapter, API,
-  threads, RAM budget and the calibration result.
-
-All jobs run on background worker threads — the UI never blocks, and Cancel
-stops a batch at the next file boundary.
-
-## Web & Android editions
-
-The same v1 format, 100% client-side, in two more editions — full technical
-details in [`docs/WEB_ANDROID.md`](docs/WEB_ANDROID.md).
-
-### Web (`web/`) — GitHub Pages
-
-Yes, it hosts on GitHub Pages: the app is pure static HTML/CSS/JS with no
-server, and **nothing is uploaded** — files are read, encrypted and written
-entirely in the browser tab. The GitHub Pages site is built and deployed by
-[`.github/workflows/pages.yml`](.github/workflows/pages.yml) on every push
-to `main` (or run it manually from the Actions tab).
-
-| Screen | What it does |
-|---|---|
-| **Encrypt** | drag-and-drop / multi-select images, passphrase + confirmation, KDF cost slider, live preview, download `<name>_encrypted.png` |
-| **Decrypt** | same shape; wrong passphrase / tampering reported per file via the HMAC check |
-| **Verify** | read-only integrity check (with or without a passphrase), same verdicts as desktop |
-| **Analyze** | entropy, adjacent-pixel correlation, NPCR/UACI (add a second image), per-channel histogram |
-
-How parity is achieved (the Python core re-implemented in JS):
-
-| Python (`opticipher/`) | Web (`web/src/`) |
-|---|---|
-| `keys.py` PBKDF2-HMAC-SHA256 | WebCrypto `PBKDF2` |
-| `core.py` HMAC-SHA256 | WebCrypto `HMAC` |
-| `diffusion.py` ChaCha20 (`cryptography`) | `chacha20.js` — pure-JS ChaCha20, 16-byte nonce (4-byte LE counter + 12-byte nonce) |
-| `scramble.py` `numpy.default_rng(seed).permutation()` | `pcg64.js` — NumPy **SeedSequence + PCG64 XSL-RR** ported exactly (two-step `srandom` seeding + uint32 mask-rejection Fisher–Yates), verified against NumPy |
-| `io_image.py` Pillow PNG | `png.js` — lossless PNG codec (pako zlib). Deliberately **not** `<canvas>`, which premultiplies alpha and would corrupt RGBA ciphertexts |
-
-Run / build it yourself:
-
-```bash
-cd web
-npm install
-npm test        # parity: PCG64 vs NumPy, ChaCha20 RFC vector, round-trip, PNG codec
-npm run build   # -> web/dist (the deployable static site)
-```
-
-Non-PNG inputs (JPEG/WebP) fall back to canvas decoding; PNGs always take
-the exact path. Large photos are slower in pure JS (a WASM ChaCha20 is the
-natural next optimisation). Interlaced / 16-bit PNGs are not handled by the
-exact decoder and use the canvas fallback.
-
-### Android (`android/`) — APK
-
-A native Kotlin app (no WebView, so folder watching and background work are
-real Android features). Same crypto core, ported 1:1 and unit-tested against
-a desktop-produced golden ciphertext.
+To build an APK:
 
 ```bash
 cd android
-./gradlew testDebugUnitTest   # parity vs the desktop golden vector
-./gradlew assembleDebug       # -> app/build/outputs/apk/debug/app-debug.apk
+./gradlew assembleDebug
+# app/build/outputs/apk/debug/app-debug.apk
 ```
 
-Releases: pushing a version tag also builds the APK in
-[`.github/workflows/android.yml`](.github/workflows/android.yml) and attaches
-it (`OptiCipher-android.apk`) to the GitHub Release alongside the desktop
-installers.
+### Web
 
-**In-app updates.** The Activity tab has **Check for updates**, which reads
-the latest GitHub Release, downloads `OptiCipher-android.apk`, verifies its
-package name, version, size/checksum (when GitHub publishes one) and signing
-certificate, then opens the system installer. On first use Android asks you
-to allow installs from OptiCipher; the app opens that settings page
-automatically.
-
-Android only installs an update signed with the **same key** as the installed
-app. Add these repository secrets so every tagged release uses one stable
-key:
-
-| Secret | Value |
-| --- | --- |
-| `ANDROID_KEYSTORE_BASE64` | base64 of your `.jks`/`.keystore` file |
-| `ANDROID_KEYSTORE_PASSWORD` | keystore password |
-| `ANDROID_KEY_ALIAS` | key alias |
-| `ANDROID_KEY_PASSWORD` | key password |
-
-For pushes and pull requests without signing secrets, CI builds a debug APK.
-For `v*` release tags, the workflow **requires** the stable signing secrets
-and fails rather than publishing an APK that cannot update an existing install.
-Bump `versionCode` and `versionName` in `android/app/build.gradle` for each
-release. Configure the signing secrets before tagging a release.
-
-**What the app does:** two independent sections, matching the workflow:
-
-1. **Batch job** — pick **images or a whole folder** (top level) into a
-   visible queue, set the output folder and passphrase, then press **Start**
-   (nothing runs on pick). Encrypt / Decrypt / Verify, live preview,
-   share/open intents, KDF cost control, safe (non-overwriting) outputs.
-2. **Folder watch** — its **own passphrase** (with its own encrypted
-   "remember" toggle), its **own output folder**, its **own mode**
-   (encrypt/decrypt new files) and a **check interval** (Instant, 15 min or
-   1 hour; a foreground watcher checks in the background and WorkManager is
-   the fallback). Neither section shares passphrase, output or mode with the
-   other.
-
-**Folder watching — auto encrypt/decrypt.** Android's scoped storage (10+)
-has no general "watch any folder", so the app uses the supported path:
-
-1. Pick a watched **Inbox** folder via the system tree picker
-   (`ACTION_OPEN_DOCUMENT_TREE`); the app keeps a **persistable URI
-   permission** (survives reboot, no broad storage permission — `MANAGE_EXTERNAL_STORAGE`
-   is deliberately avoided: Play policy would reject it).
-2. A **`ContentObserver`** on that tree queues new/changed files immediately,
-   plus a lightweight **foreground watcher service** that checks at the
-   selected interval (**Instant / 15 min / 1 hour**) and a **WorkManager
-   periodic poll** as a fallback when the service is not running.
-3. Each new PNG is checked for an existing **`OPTC` header** (by content, not
-   filename) so already-encrypted files are never re-encrypted; the output
-   folder is excluded to prevent loops. Outputs go to the watch's **own**
-   output folder — **never overwriting** (`_2`, `_3`…) — and originals are
-   copied by default (move is an opt-in toggle).
-4. The watch uses its **own passphrase**, independent of the batch job's.
-   Default is *not stored* (the watcher queues files and notifies); enabling
-   **"Remember watch passphrase"** stores it in `EncryptedSharedPreferences`
-   (AES-256) so background processing runs unattended. Nothing is ever sent
-   anywhere.
-
-**Permission flow** (asked lazily, in this order):
-
-| When | What | Why |
-|---|---|---|
-| Picking files/folders | none (system picker grants it) | SAF document/tree URI + persistable grant |
-| Optional photo library | `READ_MEDIA_IMAGES` (13+) / `READ_EXTERNAL_STORAGE` (≤12), plus `READ_MEDIA_VISUAL_USER_SELECTED` (14+ partial access) | only if you grant it from **Permissions**; the picker works without it |
-| Turning on a watch | `POST_NOTIFICATIONS` (13+) | background completion notices |
-| Optional battery settings | battery-optimisation settings screen (no restricted permission) | keeps the background watcher alive |
-| All-files access | **not requested** | SAF per-folder grants are used instead; Play policy rejects broad storage for this app |
-
-**Known limitations:** semi-transparent RGBA via `BitmapFactory` is lossy
-(Android premultiplies alpha) — opaque photos and all PNG ciphertexts
-(exact codec) are unaffected, same caveat as the web canvas fallback. The
-Kotlin PCG64 uses `BigInteger` for 128-bit state (fine for photos).
-Same threat model as desktop: PBKDF2 is memory-cheap — read the
-[threat model](#threat-model--security-notes) before protecting anything
-sensitive.
-
-### Attribution & license
-
-MIT, unchanged from upstream — © [bio-colab](https://github.com/bio-colab)
-(see [LICENSE](LICENSE)). This fork adds the `app/`, `opticipher/accel/` and
-`packaging/` trees and keeps every upstream file's behaviour intact; the
-original algorithm, CLI and docs below are theirs.
-
----
-
-## Table of contents
-
-- [OptiCipher Desktop (this fork)](#opticipher-desktop-this-fork)
-  - [Screenshots](#screenshots)
-  - [Installation (desktop app)](#installation-desktop-app)
-  - [How to use the desktop app](#how-to-use-the-desktop-app)
-- [Web & Android editions](#web--android-editions)
-  - [Web (`web/`) — GitHub Pages](#web-web--github-pages)
-  - [Android (`android/`) — APK](#android-android--apk)
-- [What "optical encryption" means here](#what-optical-encryption-means-here)
-- [Is this idea new?](#is-this-idea-new)
-- [How it works (the algorithm)](#how-it-works-the-algorithm)
-- [The self-contained header](#the-self-contained-header)
-- [Project layout](#project-layout)
-- [Installation](#installation)
-- [Quick start](#quick-start)
-- [Command-line usage](#command-line-usage)
-- [Library usage](#library-usage)
-- [Research metrics](#research-metrics)
-- [Results on the bundled sample](#results-on-the-bundled-sample)
-- [Threat model & security notes](#threat-model--security-notes)
-- [Running the tests](#running-the-tests)
-- [Benchmarking](#benchmarking)
-- [Contributing](#contributing)
-- [License](#license)
-
----
-
-## What "optical encryption" means here
-
-A normal cipher turns data into an opaque blob of bytes. OptiCipher instead keeps
-the output as a **valid image**. The encrypted file is a PNG you can open in any
-viewer; it simply shows visual noise. Two things are scrambled:
-
-| Stage | What it hides | Effect |
-|-------|---------------|--------|
-| **Scramble** (permutation) | *where* each colour is | destroys shapes, edges, text |
-| **Diffuse** (stream cipher) | *what* each colour is | flattens the histogram |
-
-Together they remove both the spatial structure and the colour statistics of the
-original, which is exactly what the standard "confusion + diffusion" principle of
-cipher design asks for.
-
----
-
-## Is this idea new?
-
-**The building blocks are well established; the specific combination here is the
-interesting part.** Image-encryption research dates back to the 1990s. You will
-find extensive prior work on:
-
-- **Pixel permutation / scrambling** — Arnold's Cat Map, chaotic maps, etc.
-- **Value diffusion** — XOR with chaotic or cryptographic keystreams.
-- **Visual / perceptual encryption** — keeping the ciphertext as an image.
-- **LSB steganography and watermarking** — hiding data inside images.
-
-What OptiCipher emphasises, and what is comparatively uncommon in one tidy
-package, is being **fully self-contained and authenticated**:
-
-1. A modern, audited stream cipher (**ChaCha20**) for diffusion rather than a
-   home-rolled chaotic map.
-2. A **size-agnostic keyed permutation** (Fisher–Yates) that works for any
-   width × height — no square-image restriction like Arnold's Cat Map.
-3. All decryption metadata (salt, iterations, dimensions) embedded **inside the
-   image**, so there is no separate key file to manage.
-4. **HMAC-SHA256 integrity**, so a wrong passphrase or any tampering is detected
-   instead of silently producing garbage.
-
-So: not a new primitive, but a clean, documented, reproducible synthesis that is
-pleasant to study and to build on.
-
----
-
-## How it works (the algorithm)
-
-```
-ENCRYPT
-                          passphrase
-                              │
-                  ┌───────────▼───────────┐
-   random salt ──►│  PBKDF2-HMAC-SHA256    │  (keys.py)
-                  └───────────┬───────────┘
-                              │  stream_key │ scramble_seed │ mac_key
-  original ─► SCRAMBLE positions ─► DIFFUSE values ─► HMAC ─► append header strip
-  (H×W×C)     (scramble.py)         (diffusion.py)   (core)   (stego.py)
-                                                                  │
-                                                                  ▼
-                                                  self-contained ciphertext PNG
-                                                       (H+strip rows × W × C)
-
-DECRYPT
-  ciphertext ─► read+parse header ─► re-derive keys ─► verify HMAC
-                (stego/header)        (keys.py)         (core.py)
-                              │ (fails fast on wrong passphrase / tampering)
-                              ▼
-             remove strip ─► UN-DIFFUSE ─► UN-SCRAMBLE ─► exact original
-```
-
-**Step by step:**
-
-1. **Key derivation (`keys.py`).** Your passphrase plus a fresh random 16-byte
-   salt are stretched by **PBKDF2-HMAC-SHA256** (default 200,000 iterations) into
-   64 bytes, split into three role-specific sub-keys: a 32-byte stream key, a
-   permutation seed, and a 16-byte MAC key. Same passphrase + salt ⇒ identical
-   keys, which is what makes decryption possible.
-
-2. **Scramble (`scramble.py`).** A keyed **Fisher–Yates** shuffle permutes pixel
-   *positions* (colours travel with their pixel). It works for any image shape
-   and is perfectly invertible.
-
-3. **Diffuse (`diffusion.py`).** Every colour byte is XOR-ed with a **ChaCha20**
-   keystream. Because each image gets a unique key (fresh salt), reusing a
-   constant-derived nonce is safe. XOR is its own inverse, so the same routine
-   encrypts and decrypts.
-
-4. **Authenticate + embed (`core.py`, `header.py`, `stego.py`).** An
-   **HMAC-SHA256** tag is computed over the header fields and the ciphertext
-   ("encrypt-then-MAC"). The header is then written into a small **reserved
-   strip** of extra pixel rows appended to the bottom of the image.
-
-Decryption reverses everything and refuses to proceed unless the HMAC verifies.
-
----
-
-## The self-contained header
-
-Every encrypted image carries a 70-byte header in a thin appended strip:
-
-| Field | Size | Purpose |
-|-------|------|---------|
-| magic `OPTC` | 4 | identify an OptiCipher file |
-| version | 1 | format versioning |
-| salt | 16 | re-derive the keys |
-| iterations | 4 | PBKDF2 cost actually used |
-| height / width | 4 + 4 | original dimensions |
-| channels | 1 | 3 (RGB) or 4 (RGBA) |
-| strip_rows | 4 | how many rows to remove on decrypt |
-| HMAC-SHA256 | 32 | integrity / passphrase check |
-
-The salt and iteration count are **not secret** — exactly like the plaintext salt
-stored next to a password hash. All confidentiality comes from the passphrase.
-
-> **Why a reserved strip and not LSB steganography?** Hiding the header in the
-> least-significant bits of the ciphertext creates a self-referential sizing
-> paradox (the bits you overwrite are themselves ciphertext that must be restored
-> exactly). A dedicated strip sidesteps that entirely and guarantees a lossless
-> round trip. The trade-off is a few extra pixel rows — invisible in practice.
-
----
-
-## Project layout
-
-```
-OptiCipher/
-├── opticipher/              # the library
-│   ├── __init__.py          # public API
-│   ├── __main__.py          # enables `python -m opticipher`
-│   ├── keys.py              # PBKDF2 key derivation
-│   ├── scramble.py          # keyed pixel permutation
-│   ├── diffusion.py         # ChaCha20 value diffusion
-│   ├── header.py            # binary header layout
-│   ├── stego.py             # reserved-strip storage
-│   ├── core.py              # encrypt/decrypt orchestration + HMAC
-│   ├── io_image.py          # PNG load/save helpers
-│   ├── metrics.py           # entropy, correlation, NPCR, UACI
-│   ├── cli.py               # command-line interface
-│   └── accel/               # (fork) compute backends — bit-exact layers
-│       ├── backend.py       # backend interface, settings, auto-calibration
-│       ├── cpu.py           # threaded ChaCha20 + int32 permutation
-│       └── gpu.py           # WebGPU/WGSL kernels + adapter discovery
-├── app/                     # (fork) PySide6 desktop application
-│   ├── main.py              # entry point (python -m app.main)
-│   ├── window.py            # main window: shell + pages + job wiring
-│   ├── theme.py             # design tokens, dark/light palettes, stylesheet
-│   ├── icons.py             # QPainter-drawn icon set (no dependency)
-│   ├── widgets.py           # reusable components (cards, buttons, fields…)
-│   ├── shell.py             # sidebar + header bar
-│   ├── imaging.py           # image metadata + preview widgets
-│   ├── history.py           # in-memory session activity log
-│   ├── pages/               # one module per screen
-│   │   ├── overview.py      # home screen + quick actions
-│   │   ├── crypt.py         # encrypt & decrypt screens
-│   │   ├── verify.py        # integrity verification screen
-│   │   ├── analyze.py       # research metrics screen
-│   │   ├── history_page.py  # session log
-│   │   ├── settings_page.py # compute/crypto/appearance settings
-│   │   └── about.py         # version, provenance, limits
-│   ├── workers.py           # QThread job, analysis and verification workers
-│   ├── settings.py          # QSettings persistence → accel config
-│   ├── device.py            # CPU/RAM/GPU introspection
-│   ├── sftp.py              # sftp:// output locations (paramiko, session-only creds)
-│   └── charts.py            # histogram & metric bar widgets
-├── packaging/               # (fork) PyInstaller spec, icons, entry
-├── web/                     # (fork) browser edition — GitHub Pages, 100% client-side
-│   ├── index.html, style.css, manifest.webmanifest
-│   ├── src/                 # pcg64.js, chacha20.js, core.js, png.js, app.js
-│   ├── tests/parity.test.js # Node parity tests vs desktop golden vector
-│   └── build.mjs            # esbuild bundle -> dist/ (Pages deploy target)
-├── android/                 # (fork) native Kotlin app -> APK
-│   └── app/src/main/java/com/opticipher/
-│       ├── Crypto.kt        # PCG64/ChaCha20/PBKDF2/HMAC core (parity-tested)
-│       ├── PngCodec.kt      # lossless PNG codec (java.util.zip)
-│       ├── MainActivity.kt  # encrypt/decrypt/verify UI + share intents
-│       ├── FolderWatcher.kt # SAF folder watch + WorkManager background jobs
-│       └── WatchService.kt  # foreground watcher for near-instant background checks
-├── .github/workflows/       # (fork) 3-OS CI build + smoke tests
-│   ├── build.yml            # desktop matrix + GitHub Release on v* tags
-│   ├── pages.yml            # web -> GitHub Pages
-│   └── android.yml          # Android unit tests + APK (+ Release asset on tags)
-├── tests/                   # pytest suite (run with `pytest`)
-│   ├── test_roundtrip.py
-│   ├── test_components.py
-│   ├── test_metrics_and_sample.py
-│   ├── test_accel.py            # (fork) CPU-backend parity vs reference
-│   ├── test_gpu_accel.py        # (fork) GPU golden-vector parity
-│   ├── test_integrity_matrix.py # (fork) MAC/tamper matrix, format rules
-│   ├── test_corruption.py       # (fork) hostile/corrupt file handling
-│   ├── test_file_safety.py      # (fork) atomic, non-destructive writes
-│   ├── test_compat_matrix.py    # (fork) per-format matrix + golden vector
-│   ├── test_sftp.py             # (fork) SFTP outputs against a fake transport
-│   ├── test_gui_smoke.py        # (fork) headless GUI wiring tests
-│   └── test_ui_design.py        # (fork) design system, shell, page behaviour
-├── samples/                 # the bundled "CLAUDE CODE" sample + outputs
-│   ├── sample_claude_code.png
-│   ├── sample_encrypted.png
-│   └── sample_decrypted.png
-├── examples/                # runnable demos
-│   ├── demo.py
-│   ├── benchmark.py
-│   └── benchmark_accel.py   # (fork) CPU-vs-GPU acceleration benchmark
-├── docs/                    # extra documentation
-│   ├── ALGORITHM.md
-│   ├── METRICS.md
-│   ├── FORMAT.md               # (fork) v1 format spec + guarantees matrix
-│   ├── BENCHMARKS.md        # (fork) acceleration benchmark report
-│   └── WEB_ANDROID.md       # (fork) web + Android editions: parity, hosting, folder watch
-├── pyproject.toml           # packaging / install metadata
-├── requirements.txt
-├── LICENSE                  # MIT
-├── CONTRIBUTING.md
-└── README.md
-```
-
----
-
-## Installation
-
-Requires **Python 3.9+**.
+Build the static site locally:
 
 ```bash
-git clone <this-repository>
-cd OptiCipher
+cd web
+npm ci
+npm run build
+# serve web/dist with a local web server
+```
 
-# Option A: library + CLI only
+## How it works
+
+1. PBKDF2-HMAC-SHA256 derives keys from the passphrase and a fresh per-image salt.
+2. A keyed pixel permutation scrambles positions; ChaCha20 diffuses pixel values.
+3. HMAC-SHA256 authenticates the header and ciphertext. Metadata and the tag are embedded in an extra strip of the PNG.
+4. Decryption checks the tag before restoring pixels; a wrong passphrase or modification is rejected.
+
+The result is **pixel-exact**, not necessarily the original file bytes: decoded image pixels are restored to a new PNG, not original metadata, encoding or file structure. The desktop CPU and optional WebGPU implementations target the same reference bytes. See [algorithm](docs/ALGORITHM.md), [format](docs/FORMAT.md), [image support](docs/IMAGE_FORMAT_SUPPORT.md), and [benchmarks](docs/BENCHMARKS.md).
+
+### CLI and library
+
+```bash
 pip install -e .
-
-# Option B: desktop app (adds PySide6 + wgpu)
-pip install -e ".[app]"
-
-# Option C: just install the dependencies and run in place
-pip install -r requirements.txt
-```
-
-Core dependencies are minimal and widely used: **NumPy**, **Pillow**,
-**cryptography**. Optional extras (see `pyproject.toml`): `.[dev]` (pytest),
-`.[gpu]` (WebGPU acceleration only), `.[app]` (GUI + WebGPU).
-
-Launch the desktop app with `python -m app.main`, or use the CLI exactly as
-upstream documents below — the two share the same library and the same
-bit-exact v1 file format.
-
----
-
-## Quick start
-
-```bash
-# Encrypt (you'll be prompted for a passphrase, twice)
-opticipher encrypt samples/sample_claude_code.png encrypted.png
-
-# Decrypt
-opticipher decrypt encrypted.png recovered.png
-
-# See the statistics for any image
+opticipher encrypt input.png encrypted.png  # prompts for passphrase
+opticipher decrypt encrypted.png restored.png
 opticipher metrics encrypted.png
 ```
 
-Or run the guided demo:
+The Python API exposes `load_image`, `encrypt_image`, `decrypt_image` and `save_image`. For code examples, metrics, research background and the detailed threat model, see the [technical reference](docs/REFERENCE.md).
+
+## Security and limitations
+
+- This is a research implementation and has **not received an independent cryptographic audit**. Use established, audited encryption for high-value or safety-critical secrets.
+- PBKDF2 is not memory-hard; use a strong, unique passphrase. Anyone holding a ciphertext can attempt offline guesses.
+- HMAC detects modifications and incorrect passphrases; noise-like appearance and image metrics alone do not establish security.
+- Original inputs, previews, shared outputs, OS backups and recipient copies may remain outside the protection of the private folder. Android private files are deleted on uninstall.
+- Some Android and web image decoders may alter semi-transparent pixels; see [image support](docs/IMAGE_FORMAT_SUPPORT.md). Encryption is not intended to preserve EXIF/ICC or other file metadata.
+
+## Development
 
 ```bash
-python examples/demo.py
+pip install -e ".[app,dev]"
+pytest
+cd web && npm ci && npm test
+cd ../android && ./gradlew testDebugUnitTest
 ```
 
----
+The Python library lives in `opticipher/`, the PySide6 desktop app in `app/`, the browser edition in `web/`, and the native Android app in `android/`. See [CONTRIBUTING.md](CONTRIBUTING.md) and the [technical reference](docs/REFERENCE.md).
 
-## Command-line usage
+## License and attribution
 
-```
-opticipher encrypt  <input> <output> [--passphrase PASS] [--iterations N]
-opticipher decrypt  <input> <output> [--passphrase PASS]
-opticipher metrics  <input>
-```
-
-- Omit `--passphrase` to be prompted **securely** (no echo, no shell history).
-- `--iterations` lets you tune the PBKDF2 cost (default 200,000). The value is
-  stored in the image so decryption uses the same count automatically.
-- Output is always written as **lossless PNG** (a `.png` suffix is enforced),
-  because a lossy format like JPEG would destroy the ciphertext.
-
----
-
-## Library usage
-
-```python
-import numpy as np
-from opticipher import load_image, save_image, encrypt_image, decrypt_image
-
-# Load any image as a uint8 (H, W, C) array
-img = load_image("photo.png")
-
-# Encrypt
-enc = encrypt_image(img, "my strong passphrase")
-save_image(enc, "photo_encrypted.png")
-
-# Decrypt (bit-exact)
-dec = decrypt_image(load_image("photo_encrypted.png"), "my strong passphrase")
-assert np.array_equal(img, dec)
-```
-
-A wrong passphrase or a tampered file raises `opticipher.DecryptionError`.
-
----
-
-## Research metrics
-
-`opticipher.metrics` implements the standard image-encryption diagnostics so you
-can quantify quality rather than just eyeballing the noise. See
-[`docs/METRICS.md`](docs/METRICS.md) for the formulas and interpretation.
-
-| Metric | Function | Ideal for ciphertext |
-|--------|----------|----------------------|
-| Shannon entropy | `entropy_report` | ≈ 8.0 bits/byte |
-| Adjacent-pixel correlation | `adjacent_correlation` | ≈ 0 |
-| NPCR (pixel change rate) | `npcr` | ≈ 99.6 % |
-| UACI (intensity change) | `uaci` | ≈ 33.4 % |
-| Histogram | `histogram` | flat |
-
----
-
-## Results on the bundled sample
-
-Measured on `samples/sample_claude_code.png` (322 × 620 RGB). Reproduce with
-`python examples/demo.py`.
-
-| Metric | Original | Encrypted | Ideal |
-|--------|---------:|----------:|------:|
-| Mean Shannon entropy (bits/byte) | 2.475 | **7.999** | 8.000 |
-| Correlation, horizontal (ch0) | 0.941 | **≈ 0.00** | 0 |
-| Correlation, vertical (ch0) | 0.923 | **≈ 0.02** | 0 |
-| Correlation, diagonal (ch0) | 0.870 | **≈ 0.01** | 0 |
-| NPCR (1-pixel change) | — | **≈ 99.6 %** | 99.6 % |
-| UACI (1-pixel change) | — | **≈ 33.5 %** | 33.4 % |
-| Round-trip | — | **bit-exact** | exact |
-
-Visually:
-
-| Original | Encrypted | Decrypted |
-|----------|-----------|-----------|
-| `sample_claude_code.png` | `sample_encrypted.png` (noise) | `sample_decrypted.png` (identical) |
-
----
-
-## Threat model & security notes
-
-OptiCipher is an honest, well-documented **reference implementation**. Please read
-this section before trusting it with anything important.
-
-**What it provides**
-
-- **Confidentiality** of image content against someone without the passphrase,
-  via ChaCha20 diffusion keyed by PBKDF2.
-- **Integrity / authenticity** via HMAC-SHA256 (encrypt-then-MAC). Tampering or a
-  wrong passphrase is detected.
-- **Per-image uniqueness** via a fresh random salt, so identical plaintexts do
-  not produce identical ciphertexts.
-
-**Known limitations and honest caveats**
-
-- **PBKDF2 is memory-cheap**, so it is comparatively weak against GPU/ASIC
-  brute-force. For high-value secrets, a memory-hard KDF (Argon2id, scrypt) would
-  be stronger. PBKDF2 is used here to keep dependencies minimal and the code
-  readable; the iteration count is exposed and benchmarked.
-- The **permutation** is driven by NumPy's PRNG seeded from key material. It
-  provides spatial confusion and contributes to the statistics, but the
-  cryptographic confidentiality guarantee rests on **ChaCha20**, not on the
-  permutation alone.
-- The statistical metrics (entropy, correlation, NPCR, UACI) are **necessary but
-  not sufficient** indicators. Passing them does not constitute a security proof.
-- This project has **not** had a formal third-party cryptographic audit. Do not
-  use it as the sole protection for safety-critical or legally sensitive data.
-
-If you are a cryptographer or security researcher, contributions that harden or
-formally analyse the scheme are very welcome — see below.
-
----
-
-## Running the tests
-
-```bash
-pip install -e ".[app,dev]"  # pytest + GUI/GPU test deps
-pytest -v
-```
-
-The suite (239 tests in this fork) covers each component in isolation, full
-encrypt→decrypt round trips across many image shapes (including RGBA and
-degenerate 1×N images), Unicode passphrases, wrong-passphrase rejection, tamper
-detection, and the statistical behaviour on the real sample image — plus the
-fork's parity layers:
-
-- `test_accel.py` — CPU backend byte-parity vs the reference (thread counts,
-  band/counter-seek edge cases, permutation identity, selection/fallback).
-- `test_gpu_accel.py` — GPU golden-vector keystream parity vs OpenSSL and exact
-  metric equality (auto-skips when no WebGPU adapter is present, e.g. CI).
-- `test_gui_smoke.py` — headless (offscreen) desktop-app wiring: window
-  construction, the navigation shell, per-page file lists, settings
-  (+ tooltips), the Encrypt page's KDF slider wiring, worker round-trip,
-  analysis report shape, original+ciphertext pair alignment for NPCR/UACI,
-  the preview/info panel, the click-to-enlarge viewer, per-channel histogram
-  colours, broad tooltip coverage and the batch failure summary.
-- `test_ui_design.py` — the redesigned interface: the token system (every
-  colour in the stylesheet must come from a palette token), WCAG AA contrast
-  in both themes, theme switching + persistence, the navigation shell and
-  its keyboard shortcuts, minimum window size, tooltip coverage of every
-  control, the encrypt→decrypt round trip through the new pages, the
-  step-by-step decryption outcome (a failed step must never read as
-  success), the four verification verdicts, and the session-history
-  bookkeeping.
-- `test_integrity_matrix.py` — encrypt-then-MAC verification against every
-  single-bit/field tamper, pinned format rules, and the no-oracle property
-  (wrong passphrase ≡ tamper in the error message).
-- `test_corruption.py` — garbage/truncated/hostile files, pre-auth resource
-  bounds (crafted iteration counts rejected in milliseconds, not hours).
-- `test_file_safety.py` — atomic writes, non-clobbering outputs, original
-  files untouched, failed-save recovery, unicode paths, batch reruns.
-- `test_compat_matrix.py` — the per-format compatibility matrix (PNG JPEG
-  BMP TIFF WebP-lossless GIF, L/P/CMYK/RGBA modes), metadata-loss pins,
-  ZIP/copy/rename transformations, JPEG-re-encode detection, and the v1
-  golden ciphertext vector.
-- `test_sftp.py` — SFTP URL parsing, `.part` staging + size verification,
-  rename fallback, mirror-upload semantics, credential hygiene (fake
-  transport; no network).
-
-Every encrypted file in these tests is checked for bit-exact compatibility with
-the upstream algorithm in both directions — the format promise is a test, not
-a hope.
-
----
-
-## Benchmarking
-
-```bash
-python examples/benchmark.py        # upstream throughput baseline
-python examples/benchmark_accel.py  # fork: reference vs threaded CPU vs GPU
-```
-
-The upstream script prints encryption/decryption throughput across image
-sizes, the isolated PBKDF2 cost, and the full statistical suite, writing
-`examples/benchmark_results.json`.
-
-The fork's acceleration benchmark compares the reference, threaded-CPU and
-GPU backends on diffusion (4K/8K), metrics and end-to-end encrypt/decrypt,
-asserts bit-exactness while it measures, and writes
-[`docs/BENCHMARKS.md`](docs/BENCHMARKS.md) — including an honest section on
-where the GPU wins (histograms, weak CPUs) and where transfer overhead makes
-the CPU the better choice.
-
----
-
-## Contributing
-
-**OptiCipher is open source and community contributions are warmly invited.**
-Whether you are a student, a security researcher, or just curious, there is room
-to help. See [`CONTRIBUTING.md`](CONTRIBUTING.md) for details. Good first issues
-include:
-
-- Adding **Argon2id** as an optional KDF.
-- Adding new **metrics** (e.g. χ² histogram uniformity test, local Shannon
-  entropy, key-sensitivity analysis).
-- A **GUI** or web front-end over the library. *(shipped in this fork: the
-  PySide6 desktop app — new front-end ideas still welcome)*
-- Performance work (vectorisation, optional native backend). *(WebGPU +
-  threaded CPU shipped in this fork; more ideas welcome)*
-- More **sample images** and reproducible metric reports.
-- Independent **security analysis** and write-ups.
-
-Please open an issue to discuss substantial changes first, keep the heavy
-commenting style consistent with the existing code, and add tests for new
-behaviour.
-
----
-
-## License
-
-Released under the **MIT License** — you are free to use, modify, and
-redistribute it, including commercially, provided the copyright and licence
-notice are retained. See [`LICENSE`](LICENSE).
-
-Copyright © [bio-colab](https://github.com/bio-colab) and contributors
-(upstream OptiCipher). This Desktop fork preserves the MIT license and the
-upstream copyright notice; the added application, acceleration and packaging
-code is likewise MIT-licensed.
+MIT licensed. OptiCipher originates with [bio-colab/OptiCipher](https://github.com/bio-colab/OptiCipher); this fork adds desktop, web and Android editions. See [LICENSE](LICENSE).

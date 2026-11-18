@@ -112,6 +112,13 @@
             android:inputType="textPassword" />
     </com.google.android.material.textfield.TextInputLayout>
 
+    <com.google.android.material.button.MaterialButton
+        android:id="@+id/decryptGenerate"
+        style="@style/Widget.Material3.Button.TextButton"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Generate strong passphrase" />
+
     <com.google.android.material.materialswitch.MaterialSwitch
         android:id="@+id/decryptWatchRemember"
         android:layout_width="match_parent"
@@ -143,26 +150,17 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginStart="8dp"
-            android:text="Check for new images"
+            android:text="Check interval · timing is approximate"
             android:textAppearance="?attr/textAppearanceLabelMedium"
             android:textColor="?attr/colorOnSurfaceVariant" />
     </LinearLayout>
 
     <com.google.android.material.chip.ChipGroup
         android:id="@+id/decryptIntervalGroup"
-        android:layout_width="wrap_content"
+        android:layout_width="match_parent"
         android:layout_height="wrap_content"
         app:selectionRequired="true"
         app:singleSelection="true">
-
-        <com.google.android.material.chip.Chip
-            android:id="@+id/decryptImmediate"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:checkable="true"
-            android:text="Instant"
-            app:checkedIconVisible="false"
-            app:chipIcon="@drawable/ic_bolt" />
 
         <com.google.android.material.chip.Chip
             android:id="@+id/decrypt15"
@@ -181,7 +179,38 @@
             android:text="1 hour"
             app:checkedIconVisible="false"
             app:chipIcon="@drawable/ic_clock" />
+        <com.google.android.material.chip.Chip
+            android:id="@+id/decrypt360"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:checkable="true"
+            android:text="6 hours"
+            app:checkedIconVisible="false" />
+
+        <com.google.android.material.chip.Chip
+            android:id="@+id/decrypt720"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:checkable="true"
+            android:text="12 hours"
+            app:checkedIconVisible="false" />
+
+        <com.google.android.material.chip.Chip
+            android:id="@+id/decrypt1440"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:checkable="true"
+            android:text="Daily"
+            app:checkedIconVisible="false" />
+
     </com.google.android.material.chip.ChipGroup>
+
+    <com.google.android.material.button.MaterialButton
+        android:id="@+id/decryptWeekly"
+        style="?attr/materialButtonOutlinedStyle"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Schedule weekday and time" />
 
     <LinearLayout
         android:layout_width="match_parent"
@@ -245,7 +274,7 @@
             android:layout_height="wrap_content"
             android:layout_marginEnd="6dp"
             android:layout_weight="1"
-            android:text="Scan now"
+            android:text="Run now"
             app:icon="@drawable/ic_refresh"
             app:iconGravity="textStart" />
 
@@ -262,6 +291,13 @@
 
     <TextView
         android:id="@+id/decryptCheckStatus"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:textAppearance="?attr/textAppearanceBodySmall"
+        android:textColor="?attr/colorOnSurfaceVariant" />
+
+    <TextView
+        android:id="@+id/decryptLiveStatus"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:textAppearance="?attr/textAppearanceBodySmall"

@@ -27,10 +27,11 @@ class WatchService : Service() {
             for (mode in listOf(FolderWatcher.ENCRYPT, FolderWatcher.DECRYPT)) {
                 if (!FolderWatcher.isWatching(this@WatchService, mode)) continue
                 active = true
+                if (FolderWatcher.isWeekly(this@WatchService, mode)) continue
                 val intervalMinutes = FolderWatcher.getIntervalMinutes(this@WatchService, mode)
-                val intervalMs = if (intervalMinutes == 0) 60_000L else intervalMinutes * 60_000L
+                val intervalMs = intervalMinutes * 60_000L
                 val last = lastRun[mode] ?: 0L
-                if (intervalMs == 0L || now - last >= intervalMs) {
+                if (now - last >= intervalMs) {
                     lastRun[mode] = now
                     FolderWatcher.enqueue(this@WatchService, mode)
                 }

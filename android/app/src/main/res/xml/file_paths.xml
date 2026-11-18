@@ -2,4 +2,5 @@
 <paths>
     <cache-path name="shared" path="." />
     <external-files-path name="shared_ext" path="." />
+    <files-path name="private_exports" path="private_outputs/" />
 </paths>
