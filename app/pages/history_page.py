@@ -1,10 +1,10 @@
-"""Scrollable operation logs and completed job reviews."""
+"""Separate event logs and completed job review pages."""
 
 from PySide6.QtCore import Qt, QSignalBlocker
 from PySide6.QtGui import QFontDatabase, QTextCursor
 from PySide6.QtWidgets import (
     QAbstractItemView, QApplication, QCheckBox, QDialog, QDialogButtonBox,
-    QHBoxLayout, QHeaderView, QLabel, QMessageBox, QPlainTextEdit, QSplitter,
+    QHBoxLayout, QHeaderView, QLabel, QMessageBox, QPlainTextEdit,
     QTableWidget, QTableWidgetItem, QVBoxLayout,
 )
 
@@ -16,7 +16,7 @@ from .base import BasePage
 class HistoryPage(BasePage):
     key = "history"
     title = "Logs"
-    subtitle = "Follow app operations and confirm your review of completed jobs."
+    subtitle = "Follow app operations and copy the event log."
 
     def __init__(self, window=None, parent=None):
         super().__init__(window, parent)
@@ -53,39 +53,7 @@ class HistoryPage(BasePage):
         self.viewer.setAccessibleName("Event log")
         self.viewer.setPlaceholderText("No log entries yet")
         logs.body.addWidget(self.viewer)
-        keep = QCheckBox("Keep logs and jobs after closing")
-        keep.setToolTip("Store filenames and job outcomes in local application settings")
-        if history is not None:
-            keep.setChecked(history.persistent)
-            keep.toggled.connect(history.set_persistent)
-        logs.body.addWidget(keep)
-
-        jobs = Card("Job history")
-        self.review_button = SecondaryButton("Review job")
-        self.review_button.setToolTip("Open the selected job and review its per-file results")
-        self.review_button.clicked.connect(self._review)
-        jobs.set_header_widget(self.review_button)
-        self.table = QTableWidget(0, 4)
-        self.table.setHorizontalHeaderLabels(["Job", "Started", "Result", "Review"])
-        self.table.verticalHeader().setVisible(False)
-        self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
-        self.table.setSelectionMode(QAbstractItemView.SingleSelection)
-        self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
-        self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
-        self.table.itemSelectionChanged.connect(self._update_review)
-        self.table.cellDoubleClicked.connect(lambda *_: self._review())
-        jobs.body.addWidget(self.table)
-        self.empty = QLabel("No jobs yet")
-        jobs.body.addWidget(self.empty)
-
-        splitter = QSplitter(Qt.Vertical)
-        splitter.setChildrenCollapsible(False)
-        splitter.addWidget(logs)
-        splitter.addWidget(jobs)
-        splitter.setStretchFactor(0, 3)
-        splitter.setStretchFactor(1, 2)
-        self.content.addWidget(splitter, 1)
+        self.content.addWidget(logs, 1)
         self.refresh()
 
     def _preference(self, name):
@@ -120,6 +88,66 @@ class HistoryPage(BasePage):
 
     def refresh(self):
         self._refresh_log()
+
+    def _copy(self):
+        cursor = self.viewer.textCursor()
+        text = cursor.selectedText().replace("\u2029", "\n") if cursor.hasSelection() else self.viewer.toPlainText()
+        QApplication.clipboard().setText(text)
+
+    def _confirm_clear(self):
+        answer = QMessageBox.question(self, "Clear log", "Clear all log entries?", QMessageBox.Yes | QMessageBox.Cancel)
+        if answer == QMessageBox.Yes:
+            self._clear()
+
+    def _clear(self):
+        history = getattr(self.window, "history", None)
+        if history is not None:
+            history.clear()
+        self.refresh()
+
+
+class JobHistoryPage(BasePage):
+    key = "jobs"
+    title = "Job history"
+    subtitle = "Open a batch or folder scan to review its per-file outcomes."
+
+    def __init__(self, window=None, parent=None):
+        super().__init__(window, parent)
+        history = getattr(window, "history", None)
+        jobs = Card("Job history")
+        self.review_button = SecondaryButton("Review job")
+        self.review_button.setToolTip("Open the selected job and review its per-file results")
+        self.review_button.clicked.connect(self._review)
+        jobs.set_header_widget(self.review_button)
+        self.table = QTableWidget(0, 4)
+        self.table.setHorizontalHeaderLabels(["Job", "Started", "Result", "Review"])
+        self.table.verticalHeader().setVisible(False)
+        self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.table.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
+        self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
+        self.table.itemSelectionChanged.connect(self._update_review)
+        self.table.cellDoubleClicked.connect(lambda *_: self._review())
+        jobs.body.addWidget(self.table)
+        self.empty = QLabel("No jobs yet")
+        jobs.body.addWidget(self.empty)
+
+        keep = QCheckBox("Keep logs and jobs after closing")
+        keep.setToolTip("Store filenames and job outcomes in local application settings")
+        if history is not None:
+            keep.setChecked(history.persistent)
+            keep.toggled.connect(history.set_persistent)
+        jobs.body.addWidget(keep)
+
+        self.content.addWidget(jobs, 1)
+        self.refresh()
+
+    def _log_preference(self, name):
+        settings = self.window.history.settings
+        return settings.value(f"activity/{name}", True, bool) if settings is not None else True
+
+    def refresh(self):
         history = getattr(self.window, "history", None)
         jobs = history.jobs if history else []
         selected = self._selected_id()
@@ -148,22 +176,6 @@ class HistoryPage(BasePage):
     def _update_review(self):
         self.review_button.setEnabled(self._selected_id() is not None)
 
-    def _copy(self):
-        cursor = self.viewer.textCursor()
-        text = cursor.selectedText().replace("\u2029", "\n") if cursor.hasSelection() else self.viewer.toPlainText()
-        QApplication.clipboard().setText(text)
-
-    def _confirm_clear(self):
-        answer = QMessageBox.question(self, "Clear log", "Clear all log entries?", QMessageBox.Yes | QMessageBox.Cancel)
-        if answer == QMessageBox.Yes:
-            self._clear()
-
-    def _clear(self):
-        history = getattr(self.window, "history", None)
-        if history is not None:
-            history.clear()
-        self.refresh()
-
     def _review(self):
         job_id = self._selected_id()
         job = next((item for item in self.window.history.jobs if item.id == job_id), None)
@@ -176,11 +188,11 @@ class HistoryPage(BasePage):
         summary = QLabel(f"{timestamp_text(job.started)} · {job.summary}")
         summary.setWordWrap(True)
         layout.addWidget(summary)
-        entries = [entry.log_line(self.timestamps.isChecked()) for entry in job.outcomes]
+        entries = [entry.log_line(self._log_preference("timestamps")) for entry in job.outcomes]
         details = QPlainTextEdit("\n".join(entries) or "No file outcomes recorded.")
         details.setAccessibleName("Job results")
         details.setReadOnly(True)
-        details.setLineWrapMode(QPlainTextEdit.WidgetWidth if self.wrap.isChecked() else QPlainTextEdit.NoWrap)
+        details.setLineWrapMode(QPlainTextEdit.WidgetWidth if self._log_preference("wrap") else QPlainTextEdit.NoWrap)
         layout.addWidget(details, 1)
         buttons = QDialogButtonBox(QDialogButtonBox.Close)
         copy = buttons.addButton("Copy results", QDialogButtonBox.ActionRole)

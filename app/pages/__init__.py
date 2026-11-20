@@ -21,7 +21,7 @@ from .analyze import AnalyzePage
 from .about import AboutPage
 from .base import BasePage
 from .crypt import DecryptPage, EncryptPage
-from .history_page import HistoryPage
+from .history_page import HistoryPage, JobHistoryPage
 from .overview import OverviewPage
 from .settings_page import SettingsPage
 from .verify import VerifyPage
@@ -33,6 +33,7 @@ __all__ = [
     "DecryptPage",
     "EncryptPage",
     "HistoryPage",
+    "JobHistoryPage",
     "OverviewPage",
     "SettingsPage",
     "VerifyPage",

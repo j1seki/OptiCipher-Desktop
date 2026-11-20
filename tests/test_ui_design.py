@@ -638,15 +638,16 @@ def test_history_is_session_scoped_and_records_operations(qapp, window, sample_i
     assert counts["ok"] >= 1
 
     window.navigate("history")
-    assert window.history_page.table.rowCount() >= 1
     job = window.history.jobs[0]
     assert job.name == "Encrypt" and job.finished is not None
     assert job.outcomes[0].subject == os.path.basename(src)
     assert "sample.png" in window.history_page.viewer.toPlainText()
     window.history_page.timestamps.setChecked(False)
     assert window.history_page.viewer.toPlainText().startswith("[INFO]")
+    window.navigate("jobs")
+    assert window.job_history_page.table.rowCount() >= 1
     window.history.confirm_review(job.id)
-    assert window.history_page.table.item(0, 3).text() == "Confirmed"
+    assert window.job_history_page.table.item(0, 3).text() == "Confirmed"
 
     window.history_page._clear()
     assert window.history.counts()["total"] == 0

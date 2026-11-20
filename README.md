@@ -43,13 +43,13 @@ pip install -e ".[app]"
 python -m app.main
 ```
 
-On Linux, Qt's X11 backend needs the distribution's XCB cursor library (`libxcb-cursor0` on Debian and Ubuntu).
+On Debian and Ubuntu, Qt's X11 backend needs `libxcb-cursor0`, `libxcb-icccm4`, `libxcb-keysyms1`, and `libxcb-shape0`.
 
 Choose **Encrypt**, add images, enter and confirm a passphrase, select an output destination and start. **Generate strong passphrase** fills both fields. Use **Decrypt** with the same passphrase to restore pixels. **Use private folder** saves results under your user application data. SFTP destinations keep a local result and send a copy to a server trusted in your SSH `known_hosts` file.
 
 In **Folder watch**, configure separate encrypt and decrypt inboxes, interval or weekly checks, and the output conflict policy. The desktop scheduler runs while OptiCipher is open, including when minimized. When you opt in to remembering a watch passphrase, the app uses the system credential store. History can keep recent filenames and outcomes across launches if you enable it. **About → Check for updates** opens official release downloads when a newer version is available. Desktop exposes CPU and WebGPU controls in Settings.
 
-On desktop and Android, **Logs** provides a scrollable event log with wrap and timestamp controls plus clipboard export. **Job history** below it shows completed batch operations and folder scans with their per-file results. Open a job to copy its results or confirm your review. Desktop retains logs and job history across launches when you enable local persistence on the Logs screen.
+On desktop and Android, **Logs** provides a scrollable event log with wrap and timestamp controls plus clipboard export. The separate **Job history** screen shows completed batch operations and folder scans with their per-file results. Open a job to copy its results or confirm your review. Desktop retains logs and job history across launches when you enable local persistence on the Job history screen.
 
 ### Android
 

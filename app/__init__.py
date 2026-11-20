@@ -8,7 +8,7 @@ OptiCipher Desktop — the PySide6 GUI over the OptiCipher library.
 __all__ = ["main"]
 
 #: The desktop application's version. Kept in step with pyproject.toml.
-__version__ = "1.4.4"
+__version__ = "1.4.5"
 
 
 def main() -> int:

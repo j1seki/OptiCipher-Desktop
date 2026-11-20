@@ -36,6 +36,7 @@
     <string name="clear_logs_question">Clear all event log entries? Your job history will stay available.</string>
     <string name="no_log_entries">No log entries yet</string>
     <string name="log_unavailable">Log data is unavailable.</string>
+    <string name="jobs_tab">Jobs</string>
     <string name="job_history">Job history</string>
     <string name="no_jobs">No jobs yet</string>
     <string name="no_file_outcomes">No file outcomes recorded.</string>

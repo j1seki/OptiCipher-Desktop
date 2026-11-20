@@ -84,6 +84,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var updateStatus: TextView
     private lateinit var updateBtn: View
     private lateinit var logsPanel: LogsPanel
+    private lateinit var jobsPanel: JobHistoryPanel
     private val watchProgressListener = android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
         runOnUiThread {
             if (key?.endsWith("_live") == true) refreshWatchProgress()
@@ -258,9 +259,12 @@ class MainActivity : AppCompatActivity() {
         WatchService.update(this)
         setupSettings()
         val logsPage = findViewById<View>(R.id.activityPage)
+        val jobsPage = findViewById<View>(R.id.jobsPage)
         logsPanel = LogsPanel(logsPage)
+        jobsPanel = JobHistoryPanel(jobsPage)
         JobJournal.get(this).changes.observe(this) {
             if (logsPage.visibility == View.VISIBLE) refreshLogs()
+            if (jobsPage.visibility == View.VISIBLE) jobsPanel.refresh()
         }
         setupNav(savedInstanceState)
         refreshQueue(); refreshOutputs(); refreshWatch(FolderWatcher.ENCRYPT); refreshWatch(FolderWatcher.DECRYPT)
@@ -284,7 +288,10 @@ class MainActivity : AppCompatActivity() {
         }
         toolbar.menu.findItem(R.id.action_settings)?.icon?.setTint(ContextCompat.getColor(this, R.color.brand_on_surface))
         nav.setOnItemSelectedListener { showWorkspace(it.itemId); true }
-        nav.setOnItemReselectedListener { if (it.itemId == R.id.nav_activity) refreshLogs() }
+        nav.setOnItemReselectedListener {
+            if (it.itemId == R.id.nav_activity) refreshLogs()
+            if (it.itemId == R.id.nav_jobs) jobsPanel.refresh()
+        }
         nav.selectedItemId = savedState?.getInt(STATE_WORKSPACE, R.id.nav_batch) ?: R.id.nav_batch
         showWorkspace(nav.selectedItemId)
         if (savedState?.getBoolean(STATE_SETTINGS) == true) showPage(R.id.settingsPage)
@@ -294,6 +301,7 @@ class MainActivity : AppCompatActivity() {
         showPage(when (destination) {
             R.id.nav_watch -> R.id.watchPage
             R.id.nav_activity -> R.id.activityPage
+            R.id.nav_jobs -> R.id.jobsPage
             else -> R.id.batchPage
         })
     }
@@ -301,7 +309,7 @@ class MainActivity : AppCompatActivity() {
     private fun showPage(page: Int) {
         val settings = page == R.id.settingsPage
         val toolbar = findViewById<MaterialToolbar>(R.id.toolbar)
-        for (id in intArrayOf(R.id.batchPage, R.id.watchPage, R.id.activityPage, R.id.settingsPage)) {
+        for (id in intArrayOf(R.id.batchPage, R.id.watchPage, R.id.activityPage, R.id.jobsPage, R.id.settingsPage)) {
             findViewById<View>(id).visibility = if (page == id) View.VISIBLE else View.GONE
         }
         findViewById<BottomNavigationView>(R.id.bottomNav).visibility = if (settings) View.GONE else View.VISIBLE
@@ -315,6 +323,7 @@ class MainActivity : AppCompatActivity() {
             toolbar.navigationIcon = null
         }
         if (page == R.id.activityPage) refreshLogs()
+        if (page == R.id.jobsPage) jobsPanel.refresh()
         ViewCompat.requestApplyInsets(findViewById(R.id.root))
     }
 

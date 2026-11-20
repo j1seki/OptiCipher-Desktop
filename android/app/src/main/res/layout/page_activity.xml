@@ -119,33 +119,4 @@
         </LinearLayout>
     </com.google.android.material.card.MaterialCardView>
 
-    <com.google.android.material.card.MaterialCardView style="@style/Widget.OptiCipher.SettingsCard">
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="vertical"
-            android:padding="12dp">
-
-            <TextView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="@string/job_history"
-                android:textAppearance="?attr/textAppearanceTitleMedium" />
-
-            <TextView
-                android:id="@+id/emptyJobHistory"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="8dp"
-                android:text="@string/no_jobs"
-                android:textColor="?attr/colorOnSurfaceVariant" />
-
-            <LinearLayout
-                android:id="@+id/jobHistory"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="4dp"
-                android:orientation="vertical" />
-        </LinearLayout>
-    </com.google.android.material.card.MaterialCardView>
 </LinearLayout>

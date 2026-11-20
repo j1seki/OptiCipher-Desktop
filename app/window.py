@@ -71,6 +71,7 @@ from .pages import (
     DecryptPage,
     EncryptPage,
     HistoryPage,
+    JobHistoryPage,
     OverviewPage,
     SettingsPage,
     VerifyPage,
@@ -304,7 +305,7 @@ class MainWindow(QMainWindow):
                 ("watch", "Folder watch", "folder"),
             ],
         )
-        self.sidebar.add_section("Review", [("history", "Logs", "clock")])
+        self.sidebar.add_section("Review", [("history", "Logs", "file"), ("jobs", "Job history", "clock")])
         self.sidebar.add_section(
             "System",
             [("settings", "Settings", "gear"), ("about", "About", "info")],
@@ -354,6 +355,7 @@ class MainWindow(QMainWindow):
         self.analyze_page = AnalyzePage(self)
         self.watch_page = WatchPage(self)
         self.history_page = HistoryPage(self)
+        self.job_history_page = JobHistoryPage(self)
         self.settings_page = SettingsPage(self)
         self.about_page = AboutPage(self)
         self._pages = {
@@ -366,6 +368,7 @@ class MainWindow(QMainWindow):
                 self.analyze_page,
                 self.watch_page,
                 self.history_page,
+                self.job_history_page,
                 self.settings_page,
                 self.about_page,
             )
@@ -380,6 +383,7 @@ class MainWindow(QMainWindow):
             "settings",
             "about",
             "watch",
+            "jobs",
         ]
 
         self.stack = QStackedWidget()
@@ -865,6 +869,8 @@ class MainWindow(QMainWindow):
     def _refresh_logs(self) -> None:
         if self._current_key() == "history":
             self.history_page.refresh()
+        elif self._current_key() == "jobs":
+            self.job_history_page.refresh()
 
     def _begin_history(self, key: str, name: str, file_count=None) -> None:
         detail = "Started" if file_count is None else f"Started · {file_count} file(s)"
