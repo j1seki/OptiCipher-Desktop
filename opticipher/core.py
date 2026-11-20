@@ -105,11 +105,10 @@ def encrypt_image(
         raise ValueError("pixels must be a uint8 array")
     if pixels.ndim != 3 or pixels.shape[2] not in (3, 4):
         raise ValueError("pixels must have shape (H, W, 3) or (H, W, 4)")
-    # The header stores iterations as uint32; reject anything struct.pack
-    # would fail on late (struct.error) or that no decryptor would accept.
-    if not (0 < iterations <= 0xFFFFFFFF):
+    # Only write iteration counts that v1 readers will accept.
+    if not (0 < iterations <= keys.MAX_UNVERIFIED_ITERATIONS):
         raise ValueError(
-            f"iterations must be in 1..{0xFFFFFFFF}, got {iterations}"
+            f"iterations must be in 1..{keys.MAX_UNVERIFIED_ITERATIONS}, got {iterations}"
         )
 
     h, w, channels = pixels.shape

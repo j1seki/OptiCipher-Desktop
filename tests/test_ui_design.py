@@ -468,6 +468,19 @@ def test_verify_reports_unsupported_format_for_a_plain_image(window, sample_imag
     assert results[0]["ok"] is False
 
 
+def test_verify_page_preserves_spaces_in_passphrase(window, sample_image, qapp):
+    src, pixels = sample_image
+    path = os.path.join(os.path.dirname(src), "spaces.png")
+    passphrase = " spaced passphrase "
+    save_image(encrypt_image(pixels, passphrase, iterations=10_000), path)
+    window.verify_page.files.add_paths([path])
+    window.verify_page.pass_field.edit.setText(passphrase)
+    window.verify_page.verify_btn.click()
+    assert window._verify.wait(10_000)
+    qapp.processEvents()
+    assert window.verify_page.status_badge.text() == "Verified"
+
+
 def test_verify_without_a_passphrase_claims_nothing(window, sample_image):
     """No passphrase means no integrity claim — the UI must say so."""
     from app.workers import VerifyWorker
@@ -626,9 +639,18 @@ def test_history_is_session_scoped_and_records_operations(qapp, window, sample_i
 
     window.navigate("history")
     assert window.history_page.table.rowCount() >= 1
+    job = window.history.jobs[0]
+    assert job.name == "Encrypt" and job.finished is not None
+    assert job.outcomes[0].subject == os.path.basename(src)
+    assert "sample.png" in window.history_page.viewer.toPlainText()
+    window.history_page.timestamps.setChecked(False)
+    assert window.history_page.viewer.toPlainText().startswith("[INFO]")
+    window.history.confirm_review(job.id)
+    assert window.history_page.table.item(0, 3).text() == "Confirmed"
 
     window.history_page._clear()
     assert window.history.counts()["total"] == 0
+    assert window.history.jobs[0].reviewed is not None
 
 
 def test_overview_shows_an_empty_state_instead_of_invented_numbers(window):

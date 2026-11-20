@@ -258,6 +258,14 @@ def test_plain_rename_fallback_when_posix_unsupported(target, local_file):
     assert sftp.renames[-1][2] == "plain"
 
 
+def test_plain_rename_preserves_existing_copy_on_conflict(target, local_file):
+    sftp = NoPosixSFTP()
+    sftp.files["/out/ciphertext.png"] = b"OLD-CONTENT"
+    with pytest.raises(SftpError, match="File exists"):
+        upload_file(local_file, target, client_factory=lambda: FakeClient(sftp))
+    assert sftp.files == {"/out/ciphertext.png": b"OLD-CONTENT"}
+
+
 def test_connect_failure_message_is_credential_free(target, local_file):
     client = FakeClient(fail_connect=OSError("auth banner timeout"))
     with pytest.raises(SftpError) as exc:
@@ -391,11 +399,13 @@ def test_window_rejects_invalid_sftp_url_before_starting(qapp, tiny_png, monkeyp
     )
     window = wmod.MainWindow()
     _fill_encrypt(window, tiny_png)
-    window._encrypt_out.setText("sftp://example.com:notaport/x")
+    previous_output = window.settings.output_dir
+    window._encrypt_out.setText("sftp://alice:hunter2@example.com/x")
     window._start_job("encrypt")
     assert len(warnings) == 1
     assert "Invalid SFTP location" in warnings[0][1]
     assert window._job is None  # nothing started
+    assert window.settings.output_dir == previous_output
     window.close()
 
 

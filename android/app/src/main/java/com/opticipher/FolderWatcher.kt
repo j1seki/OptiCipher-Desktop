@@ -3,10 +3,7 @@ package com.opticipher
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.content.Context
-import android.database.ContentObserver
-import android.graphics.BitmapFactory
 import android.net.Uri
-import android.os.Build
 import android.provider.DocumentsContract
 import androidx.core.app.NotificationCompat
 import androidx.documentfile.provider.DocumentFile
@@ -20,9 +17,14 @@ import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import androidx.work.OneTimeWorkRequestBuilder
+import androidx.work.Operation
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
-import java.io.File
 import java.util.concurrent.TimeUnit
 
 /**
@@ -33,6 +35,7 @@ import java.util.concurrent.TimeUnit
 object FolderWatcher {
     const val ENCRYPT = "encrypt"
     const val DECRYPT = "decrypt"
+    val MODES = listOf(ENCRYPT, DECRYPT)
     private const val PREFS = "folder_watch"
     private const val INBOX = "inbox_uri"
     private const val OUT = "out_uri"
@@ -43,8 +46,6 @@ object FolderWatcher {
     private const val EXISTING = "process_existing"
     private const val CONFLICT = "conflict" // skip or overwrite; background cannot prompt
     private const val PROCESSED = "processed"
-    private const val LOGS = "activity_logs"
-    private val observers = mutableMapOf<String, ContentObserver>()
 
     private fun key(mode: String, name: String) = "${mode}_$name"
     private fun prefs(ctx: Context) = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -57,7 +58,6 @@ object FolderWatcher {
     fun getOutputTree(ctx: Context, mode: String): Uri? = prefs(ctx).getString(key(mode, OUT), null)?.let(Uri::parse)
     fun setRememberPassphrase(ctx: Context, mode: String, on: Boolean) = prefs(ctx).edit().putBoolean(key(mode, REMEMBER), on).apply()
     fun isRemembering(ctx: Context, mode: String) = prefs(ctx).getBoolean(key(mode, REMEMBER), false)
-    fun setMoveOriginal(ctx: Context, mode: String, on: Boolean) = prefs(ctx).edit().putBoolean(key(mode, MOVE), on).apply()
     fun isMoveOriginal(ctx: Context, mode: String) = prefs(ctx).getBoolean(key(mode, MOVE), false)
     fun setIntervalMinutes(ctx: Context, mode: String, minutes: Int) = prefs(ctx).edit().putInt(key(mode, INTERVAL), minutes).apply()
     fun getIntervalMinutes(ctx: Context, mode: String) = prefs(ctx).getInt(key(mode, INTERVAL), 15).coerceAtLeast(15)
@@ -67,21 +67,17 @@ object FolderWatcher {
             .putInt(key(mode, "hour"), hour).putInt(key(mode, "minute"), minute).apply()
     }
     fun setIntervalSchedule(ctx: Context, mode: String) = prefs(ctx).edit().putBoolean(key(mode, "weekly"), false).apply()
-    fun weeklyLabel(ctx: Context, mode: String): String {
+    internal fun weeklyTime(ctx: Context, mode: String): WeeklyTime {
         val p = prefs(ctx)
-        val days = arrayOf("Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday")
-        return "Every ${days[(p.getInt(key(mode, "day"), 2) - 1).coerceIn(0, 6)]} at %02d:%02d".format(p.getInt(key(mode, "hour"), 9), p.getInt(key(mode, "minute"), 0))
+        return WeeklyTime(p.getInt(key(mode, "day"), 2).coerceIn(1, 7),
+            p.getInt(key(mode, "hour"), 9).coerceIn(0, 23), p.getInt(key(mode, "minute"), 0).coerceIn(0, 59))
     }
-    private fun weeklyDelay(ctx: Context, mode: String): Long {
-        val p = prefs(ctx); val now = java.util.Calendar.getInstance()
-        val next = java.util.Calendar.getInstance().apply {
-            set(java.util.Calendar.DAY_OF_WEEK, p.getInt(key(mode, "day"), 2))
-            set(java.util.Calendar.HOUR_OF_DAY, p.getInt(key(mode, "hour"), 9))
-            set(java.util.Calendar.MINUTE, p.getInt(key(mode, "minute"), 0))
-            set(java.util.Calendar.SECOND, 0); set(java.util.Calendar.MILLISECOND, 0)
-        }
-        if (next.timeInMillis <= now.timeInMillis) next.add(java.util.Calendar.WEEK_OF_YEAR, 1)
-        return next.timeInMillis - now.timeInMillis
+    fun weeklyLabel(ctx: Context, mode: String): String {
+        val time = weeklyTime(ctx, mode)
+        val day = java.text.DateFormatSymbols().weekdays[time.day]
+        val local = java.time.LocalTime.of(time.hour, time.minute)
+        val format = java.time.format.DateTimeFormatter.ofPattern(if (android.text.format.DateFormat.is24HourFormat(ctx)) "HH:mm" else "h:mm a")
+        return "Every $day at ${local.format(format)}"
     }
     fun setProcessExisting(ctx: Context, mode: String, on: Boolean) = prefs(ctx).edit().putBoolean(key(mode, EXISTING), on).apply()
     fun processExisting(ctx: Context, mode: String) = prefs(ctx).getBoolean(key(mode, EXISTING), true)
@@ -106,8 +102,7 @@ object FolderWatcher {
         if (!isRemembering(ctx, mode)) return false
         return try {
             val prefs = encPrefs(ctx) ?: return false
-            prefs.edit().putString("${mode}_watch_passphrase", passphrase).apply()
-            true
+            prefs.edit().putString("${mode}_watch_passphrase", passphrase).commit()
         } catch (_: Exception) { false }
     }
 
@@ -136,34 +131,37 @@ object FolderWatcher {
     fun startWatching(ctx: Context, mode: String) {
         if (getInbox(ctx, mode) == null) return
         prefs(ctx).edit().putBoolean(key(mode, WATCHING), true).apply()
-        stopWatching(ctx, mode, keepFlag = true)
         val app = ctx.applicationContext
-        // Scheduled watches must not bypass their interval on provider changes.
-        if (!isWeekly(app, mode)) enqueue(app, mode)
-        // Android's minimum periodic interval is 15 minutes. Always keep a
-        // background fallback so watching survives the app process being killed.
-        val interval = if (isWeekly(app, mode)) 7L * 24 * 60 else getIntervalMinutes(app, mode).toLong()
-        val builder = PeriodicWorkRequestBuilder<WatchWorker>(interval, TimeUnit.MINUTES)
+        val manager = WorkManager.getInstance(app)
+        WeeklyWatch.reset(app, mode)
+        if (isWeekly(app, mode)) {
+            manager.cancelUniqueWork(work(mode))
+            return
+        }
+        enqueue(app, mode, replace = true)
+        val interval = getIntervalMinutes(app, mode).toLong()
+        val request = PeriodicWorkRequestBuilder<WatchWorker>(interval, TimeUnit.MINUTES)
             .setInputData(Data.Builder().putString("mode", mode).build())
-        if (isWeekly(app, mode)) builder.setInitialDelay(weeklyDelay(app, mode), TimeUnit.MILLISECONDS)
-        val request = builder.build()
-        WorkManager.getInstance(app).enqueueUniquePeriodicWork(work(mode), ExistingPeriodicWorkPolicy.CANCEL_AND_REENQUEUE, request)
+            .setInitialDelay(interval, TimeUnit.MINUTES)
+            .build()
+        manager.enqueueUniquePeriodicWork(work(mode), ExistingPeriodicWorkPolicy.CANCEL_AND_REENQUEUE, request)
     }
 
-    fun stopWatching(ctx: Context, mode: String, keepFlag: Boolean = false) {
-        if (!keepFlag) prefs(ctx).edit().putBoolean(key(mode, WATCHING), false).apply()
-        observers.remove(mode)?.let { try { ctx.contentResolver.unregisterContentObserver(it) } catch (_: Exception) { } }
+    fun stopWatching(ctx: Context, mode: String) {
+        prefs(ctx).edit().putBoolean(key(mode, WATCHING), false).apply()
+        WeeklyWatch.reset(ctx, mode)
         WorkManager.getInstance(ctx).cancelUniqueWork(work(mode))
         WorkManager.getInstance(ctx).cancelUniqueWork(nowWork(mode))
     }
 
-    fun enqueue(ctx: Context, mode: String) {
+    fun enqueue(ctx: Context, mode: String, replace: Boolean = false): Operation {
         val request = OneTimeWorkRequestBuilder<WatchWorker>()
             .setInputData(Data.Builder().putString("mode", mode).build()).build()
         // REPLACE cancels an active large-photo encryption every time the
         // foreground watcher polls. KEEP lets it finish; the next poll catches
         // anything that arrived during the scan.
-        WorkManager.getInstance(ctx).enqueueUniqueWork(nowWork(mode), ExistingWorkPolicy.KEEP, request)
+        val policy = if (replace) ExistingWorkPolicy.REPLACE else ExistingWorkPolicy.KEEP
+        return WorkManager.getInstance(ctx).enqueueUniqueWork(nowWork(mode), policy, request)
     }
 
     fun progress(ctx: Context, mode: String, text: String, current: Int, total: Int, done: Boolean = false) {
@@ -177,159 +175,117 @@ object FolderWatcher {
         try { manager.notify(if (mode == ENCRYPT) 84 else 85, note) } catch (_: SecurityException) { }
     }
 
-    private fun processed(ctx: Context, mode: String): MutableSet<String> =
+    internal fun processed(ctx: Context, mode: String): MutableSet<String> =
         prefs(ctx).getStringSet(key(mode, PROCESSED), emptySet())!!.toMutableSet()
-    private fun saveProcessed(ctx: Context, mode: String, items: Set<String>) =
-        prefs(ctx).edit().putStringSet(key(mode, PROCESSED), items).apply()
+    internal fun saveProcessed(ctx: Context, mode: String, items: Set<String>) =
+        prefs(ctx).edit().putStringSet(key(mode, PROCESSED), items.toSet()).apply()
 
-    fun notify(ctx: Context, text: String) {
-        log(ctx, text)
-        val notifications = ctx.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        if (Build.VERSION.SDK_INT >= 26) notifications.createNotificationChannel(
-            NotificationChannel("watch", "Folder watch", NotificationManager.IMPORTANCE_LOW))
-        val notification = NotificationCompat.Builder(ctx, "watch").setSmallIcon(R.drawable.ic_check_circle)
-            .setContentTitle("OptiCipher").setContentText(text).setAutoCancel(true).build()
-        try { notifications.notify(text.hashCode(), notification) } catch (_: Exception) { }
-    }
-
-    /** A small persistent, newest-first activity log visible in the app. */
-    fun log(ctx: Context, text: String) {
-        val stamp = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.getDefault()).format(java.util.Date())
-        val old = prefs(ctx).getStringSet(LOGS, emptySet()) ?: emptySet()
-        // Store sequence-prefixed entries: StringSet does not retain insertion order.
-        val entries = old.mapNotNull { item -> item.substringAfter('|', "").takeIf { it.isNotEmpty() } }.toMutableList()
-        entries.add(0, "$stamp  $text")
-        prefs(ctx).edit().putStringSet(LOGS, entries.take(80).mapIndexed { index, value -> "%03d|%s".format(index, value) }.toSet()).apply()
-    }
-
-    fun activityLog(ctx: Context): List<String> = (prefs(ctx).getStringSet(LOGS, emptySet()) ?: emptySet())
-        .sortedBy { it.substringBefore('|').toIntOrNull() ?: Int.MAX_VALUE }.map { it.substringAfter('|') }
-    fun clearActivityLog(ctx: Context) = prefs(ctx).edit().remove(LOGS).apply()
+    fun log(ctx: Context, text: String) = JobJournal.get(ctx).log("[INFO] $text")
 }
 
 class WatchWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx, params) {
     override suspend fun doWork(): Result = withContext(Dispatchers.IO) {
-        val mode = inputData.getString("mode") ?: FolderWatcher.ENCRYPT
-        if (!running.add(mode)) return@withContext Result.success()
+        val mode = inputData.getString("mode") ?: return@withContext Result.failure()
+        val lock = locks[mode] ?: return@withContext Result.failure()
+        lock.withLock { scan(mode) }
+    }
+
+    private suspend fun scan(mode: String): Result {
+        val ctx = applicationContext
+        val journal = JobJournal.get(ctx)
+        val jobName = "Auto-$mode"
+        var jobId: String? = null
         try {
-        try {
-            if (!FolderWatcher.isWatching(applicationContext, mode)) return@withContext Result.success()
-            val inboxUri = FolderWatcher.getInbox(applicationContext, mode) ?: return@withContext Result.success()
-            val passphrase = FolderWatcher.restorePassphraseIfEnabled(applicationContext, mode)
-            if (passphrase.isNullOrEmpty()) {
-                FolderWatcher.notify(applicationContext, "OptiCipher: ${mode} watch needs its remembered passphrase")
-                return@withContext Result.success()
+            if (!FolderWatcher.isWatching(ctx, mode)) return Result.success()
+            val inboxUri = FolderWatcher.getInbox(ctx, mode) ?: return Result.success()
+            val scanId = journal.begin(jobName, "Scan started")
+            jobId = scanId
+            val passphrase = FolderWatcher.restorePassphraseIfEnabled(ctx, mode)
+            check(!passphrase.isNullOrEmpty()) { "Remember a passphrase to run this watch" }
+            val inbox = DocumentFile.fromTreeUri(ctx, inboxUri) ?: error("Input folder unavailable")
+            check(inbox.isDirectory && inbox.canRead()) { "Input folder unavailable. Choose it again to restore access." }
+            val outputUri = FolderWatcher.getOutputTree(ctx, mode)
+            val overwrite = FolderWatcher.getConflictPolicy(ctx, mode) == "overwrite"
+            val processed = FolderWatcher.processed(ctx, mode)
+            val sources = inbox.listFiles().filter { source ->
+                val name = source.name
+                name != null && !name.startsWith(".opticipher-") &&
+                    source.isFile && source.uri.toString() !in processed &&
+                    if (mode == FolderWatcher.ENCRYPT) ImageFormats.isSupported(name)
+                    else name.endsWith(".png", ignoreCase = true)
             }
-            val inbox = DocumentFile.fromTreeUri(applicationContext, inboxUri) ?: return@withContext Result.success()
-            val outTree = FolderWatcher.getOutputTree(applicationContext, mode)?.let { DocumentFile.fromTreeUri(applicationContext, it) }
-            val processed = applicationContext.getSharedPreferences("folder_watch", Context.MODE_PRIVATE)
-                .getStringSet("${mode}_processed", emptySet())!!.toMutableSet()
             var written = 0
-            var eligible = 0
-            FolderWatcher.log(applicationContext, "Auto-$mode scan started (output: ${outTree?.uri?.lastPathSegment ?: "app storage"})")
-            val sources = inbox.listFiles().filter { it.isFile && it.uri.toString() !in processed &&
-                if (mode == FolderWatcher.ENCRYPT) ImageFormats.isSupported(it.name) else it.name?.lowercase()?.endsWith(".png") == true }
-            FolderWatcher.progress(applicationContext, mode, "Checking ${sources.size} files", 0, sources.size)
+            var skipped = 0
+            var failed = 0
+            var stopped = false
+            FolderWatcher.progress(ctx, mode, "Checking ${sources.size} files", 0, sources.size)
             for ((index, source) in sources.withIndex()) {
-                if (!source.isFile || source.uri.toString() in processed) continue
-                // Ciphertext is always PNG. Encrypt, however, accepts the same
-                // common camera/image formats as the manual batch screen.
-                val inputName = source.name ?: continue
-                FolderWatcher.progress(applicationContext, mode, "Processing ${index + 1}/${sources.size} · $inputName", index, sources.size)
-                if (mode == FolderWatcher.ENCRYPT && !ImageFormats.isSupported(inputName)) continue
-                if (mode == FolderWatcher.DECRYPT && !inputName.lowercase().endsWith(".png")) continue
-                eligible++
-                val bytes = applicationContext.contentResolver.openInputStream(source.uri)?.use { it.readBytes() } ?: continue
-                val image = try { ImageInput.decodeBytes(applicationContext, bytes, inputName) } catch (error: Exception) { FolderWatcher.log(applicationContext, "Skipped $inputName: ${error.message}"); continue }
-                val encrypted = isOptiCipher(image)
-                // Encrypt only plaintext; decrypt only files that actually carry an OPTC header.
-                if ((mode == FolderWatcher.ENCRYPT && encrypted) || (mode == FolderWatcher.DECRYPT && !encrypted)) {
-                    FolderWatcher.log(applicationContext, "Ignored $inputName — ${if (mode == FolderWatcher.ENCRYPT) "already encrypted" else "not an OptiCipher file"}")
-                    processed.add(source.uri.toString()); continue
+                currentCoroutineContext().ensureActive()
+                if (!FolderWatcher.isWatching(ctx, mode) || FolderWatcher.getInbox(ctx, mode) != inboxUri ||
+                    FolderWatcher.getOutputTree(ctx, mode) != outputUri) {
+                    stopped = true
+                    break
                 }
-                FolderWatcher.log(applicationContext, "Processing $inputName (${image.width}×${image.height})…")
-                val result = if (mode == FolderWatcher.ENCRYPT) encryptImage(image, passphrase) else decryptImage(image, passphrase)
-                val sourceStem = source.name!!.substringBeforeLast('.')
-                val stem = if (mode == FolderWatcher.DECRYPT && sourceStem.endsWith("_encrypted")) sourceStem.removeSuffix("_encrypted") else sourceStem
-                val outputName = if (mode == FolderWatcher.ENCRYPT) "${stem}_encrypted.png" else "$stem.png"
-                val png = encodePNG(result.pixels, result.width, result.height, result.channels, compress = mode != FolderWatcher.ENCRYPT)
-                when (writeWatchOutput(outTree, outputName, png, mode)) {
-                    WriteResult.WRITTEN -> {
-                        processed.add(source.uri.toString())
-                        written++
-                        if (FolderWatcher.isMoveOriginal(applicationContext, mode)) try {
-                            DocumentsContract.deleteDocument(applicationContext.contentResolver, source.uri)
-                        } catch (_: Exception) { }
+                val name = source.name ?: continue
+                FolderWatcher.progress(ctx, mode, "Processing ${index + 1}/${sources.size} · $name", index, sources.size)
+                try {
+                    val image = ImageInput.decode(ctx, source.uri)
+                    val encrypt = mode == FolderWatcher.ENCRYPT
+                    if (encrypt == hasOptiCipherHeader(image)) {
+                        skipped++
+                        journal.outcome(scanId, FileOutcome(name, "SKIP", if (encrypt) "Already encrypted" else "No OptiCipher header"))
+                    } else {
+                        val result = if (encrypt) encryptImage(image, passphrase) else decryptImage(image, passphrase)
+                        val stem = name.substringBeforeLast('.')
+                        val outputName = if (encrypt) "${stem}_encrypted.png" else "${stem.removeSuffix("_encrypted")}.png"
+                        val png = encodePNG(result.pixels, result.width, result.height, result.channels, compress = !encrypt)
+                        currentCoroutineContext().ensureActive()
+                        if (!FolderWatcher.isWatching(ctx, mode) || FolderWatcher.getInbox(ctx, mode) != inboxUri ||
+                            FolderWatcher.getOutputTree(ctx, mode) != outputUri) {
+                            stopped = true
+                            break
+                        }
+                        val output = ImageOutput.write(ctx, outputUri, outputName, png,
+                            if (overwrite) OutputConflict.OVERWRITE else OutputConflict.SKIP, source = source.uri)
+                        if (output == null) {
+                            skipped++
+                            journal.outcome(scanId, FileOutcome(name, "SKIP", "$outputName already exists"))
+                        } else {
+                            written++
+                            journal.outcome(scanId, FileOutcome(name, "OK", "Saved ${output.name}"))
+                            if (FolderWatcher.isMoveOriginal(ctx, mode)) {
+                                if (!runCatching {
+                                    DocumentsContract.deleteDocument(ctx.contentResolver, source.uri)
+                                }.getOrDefault(false)) FolderWatcher.log(ctx, "Could not move original $name")
+                            }
+                        }
                     }
-                    WriteResult.SKIPPED -> {
-                        processed.add(source.uri.toString())
-                        FolderWatcher.log(applicationContext, "Skipped $outputName — output already exists")
-                    }
-                    WriteResult.FAILED -> FolderWatcher.log(applicationContext, "Could not write $outputName — will retry next scan")
+                    processed.add(source.uri.toString())
+                    if (FolderWatcher.getInbox(ctx, mode) == inboxUri) FolderWatcher.saveProcessed(ctx, mode, processed)
+                } catch (error: CancellationException) {
+                    throw error
+                } catch (error: Exception) {
+                    failed++
+                    journal.outcome(scanId, FileOutcome(name, "ERROR", error.message ?: "Unknown error"))
                 }
             }
-            applicationContext.getSharedPreferences("folder_watch", Context.MODE_PRIVATE).edit()
-                .putStringSet("${mode}_processed", processed).apply()
-            FolderWatcher.progress(applicationContext, mode, "Complete · $written written, $eligible checked", sources.size, sources.size, true)
-            if (written > 0) FolderWatcher.notify(applicationContext, "OptiCipher: $written file(s) ${mode}ed by folder watch")
-            else if (eligible > 0) FolderWatcher.notify(applicationContext, "OptiCipher: no $mode output written — files may already exist or be unreadable")
-            else FolderWatcher.log(applicationContext, "Auto-$mode scan finished — no eligible files")
-            Result.success()
-        } catch (exception: Exception) {
-            FolderWatcher.progress(applicationContext, mode, "Failed · ${exception.message}", 0, 0, true)
-            FolderWatcher.notify(applicationContext, "OptiCipher: $mode watch failed — ${exception.message}")
-            Result.success()
-        }
-        } finally {
-            running.remove(mode)
+            val summary = (if (stopped) "Stopped" else "Complete") + " · $written written, $skipped skipped, $failed failed"
+            FolderWatcher.progress(ctx, mode, summary, sources.size, sources.size, true)
+            journal.finish(scanId, jobName, summary)
+            return Result.success()
+        } catch (error: CancellationException) {
+            jobId?.let { journal.finish(it, jobName, "Scan stopped") }
+            throw error
+        } catch (error: Exception) {
+            val message = error.message ?: "Unknown error"
+            FolderWatcher.progress(ctx, mode, "Failed · $message", 0, 0, true)
+            jobId?.let { journal.finish(it, jobName, "Failed · $message") }
+                ?: FolderWatcher.log(ctx, "Auto-$mode failed · $message")
+            return Result.success()
         }
     }
 
     companion object {
-        private val running = java.util.Collections.synchronizedSet(mutableSetOf<String>())
+        private val locks = FolderWatcher.MODES.associateWith { Mutex() }
     }
-
-    private enum class WriteResult { WRITTEN, SKIPPED, FAILED }
-
-    private fun writeWatchOutput(tree: DocumentFile?, name: String, png: ByteArray, mode: String): WriteResult {
-        return try {
-            if (tree != null) {
-                val existing = tree.findFile(name)
-                if (existing != null) FolderWatcher.log(applicationContext, "Output $name already exists in ${tree.uri.lastPathSegment}")
-                if (existing != null && FolderWatcher.getConflictPolicy(applicationContext, mode) == "skip") {
-                    WriteResult.SKIPPED
-                } else {
-                    val target = existing ?: tree.createFile("image/png", name)
-                    if (target == null) {
-                        FolderWatcher.log(applicationContext, "Could not create $name in ${tree.uri}")
-                        WriteResult.FAILED
-                    } else {
-                        val stream = applicationContext.contentResolver.openOutputStream(target.uri, "wt")
-                        if (stream == null) {
-                            FolderWatcher.log(applicationContext, "Could not open $name for writing")
-                            WriteResult.FAILED
-                        } else {
-                            stream.use { it.write(png) }
-                            FolderWatcher.log(applicationContext, "Wrote $name (${png.size} bytes) to ${target.uri.lastPathSegment}")
-                            WriteResult.WRITTEN
-                        }
-                    }
-                }
-            } else {
-                val dir = File(applicationContext.getExternalFilesDir(null), "OptiCipher").apply { mkdirs() }
-                val target = File(dir, name)
-                if (target.exists() && FolderWatcher.getConflictPolicy(applicationContext, mode) == "skip") WriteResult.SKIPPED
-                else { target.writeBytes(png); WriteResult.WRITTEN }
-            }
-        } catch (_: Exception) { WriteResult.FAILED }
-    }
-
-    private fun isOptiCipher(image: ImageData): Boolean = try {
-        val bytesPerRow = image.width * image.channels
-        val rows = minOf((70 + bytesPerRow - 1) / bytesPerRow, image.height - 1)
-        val start = (image.height - rows) * bytesPerRow
-        image.pixels[start] == 0x4f.toByte() && image.pixels[start + 1] == 0x50.toByte() &&
-            image.pixels[start + 2] == 0x54.toByte() && image.pixels[start + 3] == 0x43.toByte()
-    } catch (_: Exception) { false }
-
 }

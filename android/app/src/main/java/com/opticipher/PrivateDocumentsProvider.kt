@@ -25,7 +25,8 @@ class PrivateDocumentsProvider : DocumentsProvider() {
     private fun type(f: File): String = if (f.isDirectory) Document.MIME_TYPE_DIR else MimeTypeMap.getSingleton().getMimeTypeFromExtension(f.extension.lowercase()) ?: "application/octet-stream"
     private val docColumns = arrayOf(Document.COLUMN_DOCUMENT_ID, Document.COLUMN_DISPLAY_NAME, Document.COLUMN_MIME_TYPE, Document.COLUMN_FLAGS, Document.COLUMN_SIZE, Document.COLUMN_LAST_MODIFIED)
     private fun add(cursor: MatrixCursor, f: File) {
-        val flags = if (f.isDirectory) Document.FLAG_DIR_SUPPORTS_CREATE or Document.FLAG_SUPPORTS_DELETE else Document.FLAG_SUPPORTS_WRITE or Document.FLAG_SUPPORTS_DELETE
+        val access = if (f.isDirectory) Document.FLAG_DIR_SUPPORTS_CREATE else Document.FLAG_SUPPORTS_WRITE
+        val flags = if (f == root) access else access or Document.FLAG_SUPPORTS_DELETE or Document.FLAG_SUPPORTS_RENAME
         cursor.addRow(arrayOf(id(f), if (f == root) "OptiCipher private" else f.name, type(f), flags, f.length(), f.lastModified()))
     }
     override fun queryRoots(projection: Array<out String>?): Cursor {
@@ -67,14 +68,33 @@ class PrivateDocumentsProvider : DocumentsProvider() {
     }
     override fun openDocument(documentId: String, mode: String, signal: CancellationSignal?): ParcelFileDescriptor =
         ParcelFileDescriptor.open(file(documentId), ParcelFileDescriptor.parseMode(mode))
+    @Synchronized
     override fun createDocument(parentDocumentId: String, mimeType: String, displayName: String): String {
-        require(displayName.isNotBlank() && displayName != "." && displayName != ".." && !displayName.contains('/') && !displayName.contains('\\'))
+        validateName(displayName)
         val parent = file(parentDocumentId); if (!parent.isDirectory) throw FileNotFoundException()
         var target = File(parent, displayName); var n = 2
-        while (target.exists()) target = File(parent, "$displayName (${n++})")
+        val suffix = target.extension.takeIf { it.isNotEmpty() && mimeType != Document.MIME_TYPE_DIR }
+        while (target.exists()) {
+            val name = if (suffix == null) "$displayName (${n++})"
+                else "${displayName.removeSuffix(".$suffix")} (${n++}).$suffix"
+            target = File(parent, name)
+        }
         val created = if (mimeType == Document.MIME_TYPE_DIR) target.mkdir() else target.createNewFile()
         if (!created) throw FileNotFoundException("Cannot create document")
         return id(target)
+    }
+    @Synchronized
+    override fun renameDocument(documentId: String, displayName: String): String {
+        validateName(displayName)
+        val source = file(documentId)
+        check(source != root && source.exists()) { "Cannot rename this document" }
+        val target = File(source.parentFile, displayName)
+        if (target == source) return documentId
+        if (target.exists() || !source.renameTo(target)) throw FileNotFoundException("Cannot rename document")
+        return id(target)
+    }
+    private fun validateName(name: String) {
+        require(name.isNotBlank() && name != "." && name != ".." && '/' !in name && '\\' !in name)
     }
     override fun deleteDocument(documentId: String) {
         val target = file(documentId)

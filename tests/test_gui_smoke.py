@@ -42,7 +42,7 @@ def test_main_window_constructs(qapp):
     window = MainWindow()
     # The redesigned shell is a sidebar + a page stack (one page per real
     # feature) instead of the old three-tab widget.
-    assert window.stack.count() == 8
+    assert window.stack.count() == 9
     keys = [window.stack.widget(i).key for i in range(window.stack.count())]
     assert keys == [
         "overview",
@@ -53,10 +53,11 @@ def test_main_window_constructs(qapp):
         "history",
         "settings",
         "about",
+        "watch",
     ]
     # The sidebar offers exactly those pages — no empty placeholders.
     nav_keys = [b.key for b in window.sidebar._buttons]
-    assert nav_keys == keys
+    assert set(nav_keys) == set(keys)
     # Device bar shows something for this machine.
     assert "Device:" in window.device_label.text()
     window.close()

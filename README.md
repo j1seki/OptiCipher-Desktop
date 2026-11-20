@@ -12,9 +12,10 @@ OptiCipher is an open-source image-encryption research project for **desktop, An
 
 | | Desktop | Android APK | Web |
 |---|---|---|---|
-| **Encrypt / decrypt** | Batch images, previews, optional SFTP copy | Batch queue and sharing | Locally in the browser |
-| **Verify** | Authenticate without restoring | Verify queued images | Authenticate or inspect format |
-| **Explore** | Entropy, correlation, NPCR/UACI and histograms | Folder watch and activity log | Image statistics |
+| **Encrypt / decrypt** | Batch, previews, private storage and optional SFTP copy | Batch, previews, private storage, sharing and optional SFTP copy | Locally in the browser |
+| **Verify** | Batch format and integrity checks | Batch format and integrity checks | Authenticate or inspect format |
+| **Analyze** | Entropy, correlation, NPCR/UACI and histograms | Entropy, correlation, NPCR/UACI and histograms | Image statistics |
+| **Folder watch** | Independent schedules while the desktop app is open | Independent schedules through Android background work | — |
 | **Run** | Linux, macOS, Windows | Native Kotlin app | Static site, no server required |
 
 Ciphertexts use the same v1 format across editions. Save and transfer encrypted images as **lossless PNG**; lossy conversion destroys the ciphertext.
@@ -42,13 +43,23 @@ pip install -e ".[app]"
 python -m app.main
 ```
 
-Choose **Encrypt**, add images, enter and confirm a passphrase, select an output destination and start. Use **Decrypt** with the same passphrase to restore pixels. Desktop also supports CPU / optional WebGPU acceleration and optional SFTP output copies.
+On Linux, Qt's X11 backend needs the distribution's XCB cursor library (`libxcb-cursor0` on Debian and Ubuntu).
+
+Choose **Encrypt**, add images, enter and confirm a passphrase, select an output destination and start. **Generate strong passphrase** fills both fields. Use **Decrypt** with the same passphrase to restore pixels. **Use private folder** saves results under your user application data. SFTP destinations keep a local result and send a copy to a server trusted in your SSH `known_hosts` file.
+
+In **Folder watch**, configure separate encrypt and decrypt inboxes, interval or weekly checks, and the output conflict policy. The desktop scheduler runs while OptiCipher is open, including when minimized. When you opt in to remembering a watch passphrase, the app uses the system credential store. History can keep recent filenames and outcomes across launches if you enable it. **About → Check for updates** opens official release downloads when a newer version is available. Desktop exposes CPU and WebGPU controls in Settings.
+
+On desktop and Android, **Logs** provides a scrollable event log with wrap and timestamp controls plus clipboard export. **Job history** below it shows completed batch operations and folder scans with their per-file results. Open a job to copy its results or confirm your review. Desktop retains logs and job history across launches when you enable local persistence on the Logs screen.
 
 ### Android
 
-Install `OptiCipher-android.apk` from [Releases](https://github.com/j1seki/OptiCipher-Desktop/releases). In **Batch**, choose an action and images, set a passphrase and destination, and start the queue. **Folder watch** configures independent encrypt and decrypt inboxes using Android's system folder picker.
+Install `OptiCipher-android.apk` from [Releases](https://github.com/j1seki/OptiCipher-Desktop/releases). In **Batch**, choose Encrypt, Decrypt, Verify or Analyze, then start the selected action from the queue. Verify shows each image's format, authentication result and file hash. Analyze shows the histogram, entropy and correlation of the first image, plus NPCR and UACI for a comparable second image. Change the theme under **Settings → Appearance**.
 
-Folder watches offer recurring checks every **15 minutes, 1 hour, 6 hours, 12 hours or daily**, or a **weekly weekday and time**, plus **Run now** to queue a check while the watch is enabled. Interval watches queue an initial check; weekly watches wait for their scheduled time unless you choose Run now. Android can delay background work; neither a schedule nor Run now promises exact timing. Background watches require the separate remembered watch passphrase, stored using Android Keystore-backed encrypted preferences. The existing conflict policy controls whether outputs are skipped or overwritten.
+For an SFTP copy, choose **Configure SFTP copy** under Batch output. Enter the SFTP URL and paste the server's public host key from a trusted source. Authenticate with a password or a selected SSH private key. Each result is saved locally first. The transfer settings live in the current app session.
+
+**Folder watch** configures independent encrypt and decrypt inboxes using Android's system folder picker.
+
+Folder watches offer recurring checks every **15 minutes, 1 hour, 6 hours, 12 hours or daily**, or a **weekly weekday and time**, plus **Run now** to queue a check while the watch is enabled. Interval watches queue an initial check. Weekly watches use the device's local time and wait for their scheduled time unless you choose Run now. Android can delay background work. Background watches require the separate remembered watch passphrase, stored using Android Keystore-backed encrypted preferences. Choose **Skip** or **Overwrite** for output conflicts. Overwriting in a picked folder requires a provider that supports renaming files.
 
 Progress is reported per file in the app and notifications; a large image has no finer-grained progress indicator. Passphrase fields include an optional secure random generator; save generated passphrases somewhere safe.
 
@@ -70,8 +81,10 @@ Build the static site locally:
 cd web
 npm ci
 npm run build
-# serve web/dist with a local web server
+python3 -m http.server --bind 127.0.0.1 --directory dist 8000
 ```
+
+Open `http://127.0.0.1:8000`. A hosted copy needs HTTPS for Web Crypto.
 
 ## How it works
 

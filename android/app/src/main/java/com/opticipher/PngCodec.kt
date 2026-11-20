@@ -1,24 +1,18 @@
 package com.opticipher
 
-import java.io.ByteArrayInputStream
+import java.io.ByteArrayOutputStream
+import java.io.OutputStream
+import java.util.zip.CRC32
 import java.util.zip.Deflater
+import java.util.zip.DeflaterOutputStream
 import java.util.zip.Inflater
-import java.nio.ByteBuffer
-import java.nio.channels.Channels
 
 // Lossless PNG codec (8-bit, non-interlaced) using java.util.zip — pixel-exact
 // for RGB/RGBA ciphertexts. Greyscale/palette expand to RGB like Pillow.
 private val PNG_SIG = byteArrayOf(137.toByte(), 80, 78, 71, 13, 10, 26, 10)
-private val CRC_TABLE = IntArray(256) { n ->
-    var c = n
-    repeat(8) { c = if (c and 1 != 0) 0xedb88320.toInt() xor (c ushr 1) else c ushr 1 }
-    c
-}
-private fun crc32(buf: ByteArray, off: Int = 0, len: Int = buf.size): Int {
-    var c = -1
-    for (i in off until off + len) c = CRC_TABLE[(c xor buf[i].toInt()) and 0xff] xor (c ushr 8)
-    return c xor -1
-}
+private fun crc32(buf: ByteArray, off: Int, len: Int): Int =
+    CRC32().apply { update(buf, off, len) }.value.toInt()
+
 private fun chunk(type: String, data: ByteArray): ByteArray {
     val out = ByteArray(12 + data.size)
     val tb = type.toByteArray(Charsets.US_ASCII)
@@ -34,22 +28,28 @@ fun encodePNG(pixels: ByteArray, width: Int, height: Int, channels: Int, compres
     fun be(off: Int, v: Int) { ihdr[off] = (v ushr 24).toByte(); ihdr[off + 1] = (v ushr 16).toByte(); ihdr[off + 2] = (v ushr 8).toByte(); ihdr[off + 3] = v.toByte() }
     be(0, width); be(4, height); ihdr[8] = 8; ihdr[9] = colorType.toByte()
     val stride = width * channels
-    val raw = ByteArray((stride + 1) * height)
-    for (y in 0 until height) System.arraycopy(pixels, y * stride, raw, y * (stride + 1) + 1, stride)
-    val deflater = Deflater(if (compress) 6 else Deflater.NO_COMPRESSION)
-    deflater.setInput(raw); deflater.finish()
-    val compressed = java.io.ByteArrayOutputStream(raw.size + 4096)
-    val buf = ByteArray(64 * 1024)
-    while (!deflater.finished()) {
-        val n = deflater.deflate(buf)
-        if (n > 0) compressed.write(buf, 0, n) else if (deflater.needsInput()) break
+    val output = ByteArrayOutputStream()
+    output.write(PNG_SIG)
+    output.write(chunk("IHDR", ihdr))
+    val idat = object : OutputStream() {
+        override fun write(value: Int) = write(byteArrayOf(value.toByte()), 0, 1)
+        override fun write(data: ByteArray, offset: Int, size: Int) {
+            output.write(chunk("IDAT", data.copyOfRange(offset, offset + size)))
+        }
     }
-    deflater.end()
-    val parts = listOf(PNG_SIG, chunk("IHDR", ihdr), chunk("IDAT", compressed.toByteArray()), chunk("IEND", ByteArray(0)))
-    val total = parts.sumOf { it.size }
-    val out = ByteArray(total); var off = 0
-    for (p in parts) { System.arraycopy(p, 0, out, off, p.size); off += p.size }
-    return out
+    val deflater = Deflater(if (compress) 6 else Deflater.NO_COMPRESSION)
+    try {
+        DeflaterOutputStream(idat, deflater, 64 * 1024).use { stream ->
+            for (y in 0 until height) {
+                stream.write(0) // Unfiltered row
+                stream.write(pixels, y * stride, stride)
+            }
+        }
+    } finally {
+        deflater.end()
+    }
+    output.write(chunk("IEND", ByteArray(0)))
+    return output.toByteArray()
 }
 
 private fun paeth(a: Int, b: Int, c: Int): Int {
@@ -60,31 +60,55 @@ private fun paeth(a: Int, b: Int, c: Int): Int {
 fun decodePNG(bytes: ByteArray): ImageData {
     require(bytes.size >= 8 && PNG_SIG.indices.all { bytes[it] == PNG_SIG[it] }) { "not a PNG file" }
     var off = 8; var width = 0; var height = 0; var bitDepth = 0; var colorType = 0; var interlace = 0
+    var ended = false
     var plte: ByteArray? = null; val idat = mutableListOf<ByteArray>()
-    while (off + 8 <= bytes.size) {
-        val len = ((bytes[off].toInt() and 0xff) shl 24) or ((bytes[off + 1].toInt() and 0xff) shl 16) or
-            ((bytes[off + 2].toInt() and 0xff) shl 8) or (bytes[off + 3].toInt() and 0xff)
+    while (off <= bytes.size - 12) {
+        val len = be32(bytes, off)
+        require(len in 0..(bytes.size - off - 12)) { "truncated PNG chunk" }
         val type = String(bytes, off + 4, 4, Charsets.US_ASCII)
+        require(crc32(bytes, off + 4, len + 4) == be32(bytes, off + 8 + len)) { "invalid PNG chunk checksum" }
         val data = bytes.copyOfRange(off + 8, off + 8 + len)
         when (type) {
-            "IHDR" -> { width = be32(data, 0); height = be32(data, 4); requireProcessableImage(width, height); bitDepth = data[8].toInt(); colorType = data[9].toInt(); interlace = data[12].toInt() }
+            "IHDR" -> {
+                require(off == 8 && len == 13) { "invalid PNG header" }
+                width = be32(data, 0)
+                height = be32(data, 4)
+                bitDepth = data[8].toInt()
+                colorType = data[9].toInt()
+                interlace = data[12].toInt()
+            }
             "PLTE" -> plte = data
             "IDAT" -> idat.add(data)
-            "IEND" -> break
+            "IEND" -> { ended = len == 0; break }
         }
         off += 12 + len
     }
     require(bitDepth == 8) { "unsupported PNG bit depth $bitDepth (only 8-bit is pixel-exact here)" }
     require(interlace == 0) { "interlaced PNG not supported by the exact decoder" }
+    require(ended && idat.isNotEmpty()) { "incomplete PNG data" }
     val srcCh = mapOf(0 to 1, 2 to 3, 3 to 1, 4 to 2, 6 to 4)[colorType] ?: throw IllegalArgumentException("unsupported PNG colour type $colorType")
+    // RGB/RGBA ciphertext can exceed the source limit by its header strip.
+    require(width in 1..MAX_PROCESS_PIXELS) { "invalid PNG width" }
+    val stripPixels = if (colorType == 2 || colorType == 6) rowsNeeded(HEADER_SIZE, width, srcCh).toLong() * width else 0L
+    requireProcessableImage(width, height, MAX_PROCESS_PIXELS + stripPixels)
     val z = ByteArray(idat.sumOf { it.size }); var zo = 0
     for (p in idat) { System.arraycopy(p, 0, z, zo, p.size); zo += p.size }
-    val inflater = Inflater(); inflater.setInput(z)
     val stride = width * srcCh
-    val raw = ByteArray((stride + 1) * height + 1024)
-    var rawLen = 0
-    while (!inflater.finished()) { val n = inflater.inflate(raw, rawLen, raw.size - rawLen); if (n == 0) break; rawLen += n }
-    inflater.end()
+    val expectedSize = (stride + 1) * height
+    val raw = ByteArray(expectedSize + 1)
+    val inflater = Inflater()
+    try {
+        inflater.setInput(z)
+        var rawLen = 0
+        while (!inflater.finished() && rawLen < raw.size) {
+            val count = inflater.inflate(raw, rawLen, raw.size - rawLen)
+            if (count == 0) break
+            rawLen += count
+        }
+        require(inflater.finished() && rawLen == expectedSize) { "PNG data does not match its dimensions" }
+    } finally {
+        inflater.end()
+    }
     val unfiltered = ByteArray(stride * height)
     var pos = 0
     for (y in 0 until height) {

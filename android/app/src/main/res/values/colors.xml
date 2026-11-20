@@ -2,14 +2,15 @@
 <resources>
     <!-- Brand tokens from the desktop design system (app/theme.py) -->
     <color name="ic_launcher_background">#101318</color>
-    <color name="brand_accent">#73E8C2</color>
-    <color name="brand_accent_dark">#2BB88C</color>
-    <color name="brand_bg">#0D1218</color>
-    <color name="brand_surface">#18212B</color>
-    <color name="brand_on_accent">#062018</color>
-    <color name="brand_on_surface">#E6EDF3</color>
-    <color name="brand_muted">#ACBAC7</color>
-    <color name="brand_outline">#344350</color>
-    <color name="brand_error">#FF6B6B</color>
-    <color name="brand_success">#38D6A3</color>
+    <color name="brand_accent">#006653</color>
+    <color name="brand_accent_dark">#005344</color>
+    <color name="brand_container">#D6EEE6</color>
+    <color name="brand_bg">#F5F8FA</color>
+    <color name="brand_surface">#E9EFF3</color>
+    <color name="brand_on_accent">#FFFFFF</color>
+    <color name="brand_on_surface">#161E25</color>
+    <color name="brand_muted">#4D5B68</color>
+    <color name="brand_outline">#C1CCD4</color>
+    <color name="brand_error">#B42328</color>
+    <color name="brand_success">#006651</color>
 </resources>

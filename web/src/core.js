@@ -130,6 +130,9 @@ export function unscramblePixels(pixels, width, height, channels, seed) {
 export async function encryptImage(pixels, width, height, channels, passphrase, iterations = DEFAULT_ITERATIONS) {
   if (![3, 4].includes(channels)) throw new Error('pixels must have 3 or 4 channels');
   if (pixels.length !== width * height * channels) throw new Error('pixel buffer size mismatch');
+  if (!Number.isInteger(iterations) || iterations < 1 || iterations > MAX_UNVERIFIED_ITERATIONS) {
+    throw new Error(`iterations must be in 1..${MAX_UNVERIFIED_ITERATIONS}`);
+  }
   const salt = new Uint8Array(SALT_LENGTH);
   globalThis.crypto.getRandomValues(salt);
   const derived = splitKeys(await pbkdf2(passphrase, salt, iterations));

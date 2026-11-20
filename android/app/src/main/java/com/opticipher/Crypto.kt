@@ -225,6 +225,7 @@ private fun peekHeader(pixels: ByteArray, width: Int, channels: Int, height: Int
     var rows = (HEADER_SIZE + bpr - 1) / bpr
     rows = minOf(rows, height - 1)
     val start = (height - rows) * bpr
+    require(start >= 0 && start <= pixels.size - HEADER_SIZE) { "image is too small for an OptiCipher header" }
     return pixels.copyOfRange(start, start + HEADER_SIZE)
 }
 
@@ -251,20 +252,33 @@ fun unscramblePixels(pixels: ByteArray, width: Int, height: Int, channels: Int, 
 
 data class ImageData(val pixels: ByteArray, val width: Int, val height: Int, val channels: Int)
 
+internal data class ImageHeader(val version: Int, val width: Int, val height: Int, val channels: Int,
+                                val iterations: Int, val stripRows: Int)
+
+internal fun inspectImage(image: ImageData): ImageHeader? = try {
+    val header = parseHeader(peekHeader(image.pixels, image.width, image.channels, image.height))
+    ImageHeader(header.version, header.width, header.height, header.channels, header.iterations, header.stripRows)
+} catch (_: IllegalArgumentException) {
+    null
+}
+
+internal fun hasOptiCipherHeader(image: ImageData) = inspectImage(image) != null
+
 // The encryption pipeline needs several full-size buffers (decoded bitmap,
 // scrambled pixels, ciphertext, PNG scanlines and compressed output). The app
 // requests a large heap so common 12–16 MP phone photos fit comfortably.
 const val MAX_PROCESS_PIXELS = 16_000_000
-fun requireProcessableImage(width: Int, height: Int) {
+fun requireProcessableImage(width: Int, height: Int, maxPixels: Long = MAX_PROCESS_PIXELS.toLong()) {
     require(width > 0 && height > 0) { "invalid image dimensions" }
     val pixels = width.toLong() * height.toLong()
-    require(pixels <= MAX_PROCESS_PIXELS) {
+    require(pixels <= maxPixels) {
         "image is ${pixels / 1_000_000.0} MP; this build supports up to 16 MP. Resize larger images first."
     }
 }
 
 fun encryptImage(img: ImageData, passphrase: String, iterations: Int = DEFAULT_ITERATIONS): ImageData {
     require(img.channels == 3 || img.channels == 4)
+    require(iterations in 1..MAX_UNVERIFIED_ITERATIONS) { "iterations must be in 1..$MAX_UNVERIFIED_ITERATIONS" }
     requireProcessableImage(img.width, img.height)
     val salt = ByteArray(SALT_LENGTH).also { SecureRandom().nextBytes(it) }
     val derived = deriveKeys(passphrase, salt, iterations)
@@ -298,12 +312,13 @@ private fun authenticate(img: ImageData, passphrase: String): Auth {
     if (mainCipher.size != hdr.height * hdr.width * hdr.channels)
         throw DecryptionError("image dimensions do not match the embedded header (corrupted file).")
     val expected = hmac(derived.macKey, packPrehmac(hdr), mainCipher)
-    if (!expected.contentEquals(hdr.hmac)) throw DecryptionError("integrity check failed: wrong passphrase or the file was modified.")
+    if (!java.security.MessageDigest.isEqual(expected, hdr.hmac)) throw DecryptionError("integrity check failed: wrong passphrase or the file was modified.")
     return Auth(hdr, mainCipher, derived)
 }
 
 fun decryptImage(img: ImageData, passphrase: String): ImageData {
     val (hdr, mainCipher, derived) = authenticate(img, passphrase)
+    requireProcessableImage(hdr.width, hdr.height)
     if (hdr.version != 1) throw IllegalStateException("unsupported OptiCipher format version ${hdr.version} — this build reads version 1. Update OptiCipher to open this file.")
     val nonce = sha256(hdr.salt).copyOf(16)
     val undiffused = chachaXor(mainCipher, derived.streamKey, nonce)

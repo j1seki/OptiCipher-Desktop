@@ -55,175 +55,97 @@
         </LinearLayout>
     </com.google.android.material.card.MaterialCardView>
 
-    <com.google.android.material.card.MaterialCardView
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginBottom="12dp"
-        app:cardBackgroundColor="@color/brand_surface"
-        app:cardCornerRadius="24dp"
-        app:cardElevation="0dp"
-        app:strokeColor="@color/brand_outline"
-        app:strokeWidth="1dp">
-
+    <com.google.android.material.card.MaterialCardView style="@style/Widget.OptiCipher.SettingsCard">
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="vertical"
-            android:padding="16dp">
+            android:padding="12dp">
 
-            <LinearLayout
+            <TextView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:gravity="center_vertical"
-                android:orientation="horizontal">
+                android:text="@string/event_log"
+                android:textAppearance="?attr/textAppearanceTitleMedium" />
 
-                <ImageView
-                    android:layout_width="22dp"
-                    android:layout_height="22dp"
-                    android:contentDescription="@null"
-                    android:src="@drawable/ic_notifications"
-                    app:tint="@color/brand_accent" />
-
-                <TextView
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_marginStart="10dp"
-                    android:layout_weight="1"
-                    android:text="Permissions"
-                    android:textAppearance="?attr/textAppearanceTitleMedium" />
-            </LinearLayout>
-
-            <com.google.android.material.button.MaterialButton
-                android:id="@+id/permissionsBtn"
-                style="?attr/materialButtonOutlinedStyle"
+            <com.google.android.material.chip.ChipGroup
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="8dp"
-                android:text="Notifications, battery &amp; folders"
-                app:icon="@drawable/ic_shield"
-                app:iconGravity="textStart" />
-        </LinearLayout>
-    </com.google.android.material.card.MaterialCardView>
+                app:chipSpacing="8dp">
 
-    <com.google.android.material.card.MaterialCardView
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginBottom="12dp"
-        app:cardBackgroundColor="@color/brand_surface"
-        app:cardCornerRadius="24dp"
-        app:cardElevation="0dp"
-        app:strokeColor="@color/brand_outline"
-        app:strokeWidth="1dp">
-
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:gravity="center_vertical"
-            android:orientation="horizontal"
-            android:padding="16dp">
-
-            <ImageView
-                android:layout_width="22dp"
-                android:layout_height="22dp"
-                android:contentDescription="@null"
-                android:src="@drawable/ic_update"
-                app:tint="@color/brand_accent" />
-
-            <LinearLayout
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_marginStart="12dp"
-                android:layout_weight="1"
-                android:orientation="vertical">
-
-                <TextView
+                <com.google.android.material.checkbox.MaterialCheckBox
+                    android:id="@+id/logWrap"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="Updates"
-                    android:textAppearance="?attr/textAppearanceTitleSmall" />
+                    android:text="@string/wrap_lines" />
 
-                <TextView
-                    android:id="@+id/updateStatus"
+                <com.google.android.material.checkbox.MaterialCheckBox
+                    android:id="@+id/logTimestamps"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:textAppearance="?attr/textAppearanceBodySmall"
-                    android:textColor="?attr/colorOnSurfaceVariant" />
-            </LinearLayout>
+                    android:text="@string/log_timestamps" />
+            </com.google.android.material.chip.ChipGroup>
 
-            <com.google.android.material.button.MaterialButton
-                android:id="@+id/updateBtn"
-                style="@style/Widget.Material3.Button.TextButton"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="Check"
-                app:icon="@drawable/ic_download"
-                app:iconGravity="textStart" />
-        </LinearLayout>
-    </com.google.android.material.card.MaterialCardView>
+            <com.opticipher.LogTextView
+                android:id="@+id/activityLog"
+                android:layout_width="match_parent"
+                android:layout_height="220dp"
+                android:background="?attr/colorSurface"
+                android:padding="8dp"
+                android:saveEnabled="false"
+                android:scrollbars="vertical|horizontal"
+                android:textAppearance="?attr/textAppearanceBodySmall"
+                android:textColor="?attr/colorOnSurface" />
 
-    <com.google.android.material.card.MaterialCardView
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        app:cardBackgroundColor="@color/brand_surface"
-        app:cardCornerRadius="24dp"
-        app:cardElevation="0dp"
-        app:strokeColor="@color/brand_outline"
-        app:strokeWidth="1dp">
-
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="vertical"
-            android:padding="16dp">
-
-            <LinearLayout
+            <com.google.android.material.chip.ChipGroup
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:gravity="center_vertical"
-                android:orientation="horizontal">
-
-                <ImageView
-                    android:layout_width="22dp"
-                    android:layout_height="22dp"
-                    android:contentDescription="@null"
-                    android:src="@drawable/ic_history"
-                    app:tint="@color/brand_accent" />
-
-                <TextView
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_marginStart="10dp"
-                    android:layout_weight="1"
-                    android:text="Recent activity"
-                    android:textAppearance="?attr/textAppearanceTitleMedium" />
+                app:chipSpacing="8dp">
 
                 <com.google.android.material.button.MaterialButton
-                    android:id="@+id/refreshLogBtn"
+                    android:id="@+id/copyLogBtn"
                     style="@style/Widget.Material3.Button.TextButton"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:contentDescription="Refresh activity log"
-                    app:icon="@drawable/ic_refresh"
-                    app:iconPadding="0dp" />
+                    android:text="@string/copy_logs" />
 
                 <com.google.android.material.button.MaterialButton
                     android:id="@+id/clearLogBtn"
                     style="@style/Widget.Material3.Button.TextButton"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:contentDescription="Clear activity log"
-                    app:icon="@drawable/ic_delete"
-                    app:iconPadding="0dp" />
-            </LinearLayout>
+                    android:text="@string/clear_logs" />
+            </com.google.android.material.chip.ChipGroup>
+        </LinearLayout>
+    </com.google.android.material.card.MaterialCardView>
+
+    <com.google.android.material.card.MaterialCardView style="@style/Widget.OptiCipher.SettingsCard">
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:padding="12dp">
 
             <TextView
-                android:id="@+id/activityLog"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/job_history"
+                android:textAppearance="?attr/textAppearanceTitleMedium" />
+
+            <TextView
+                android:id="@+id/emptyJobHistory"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="8dp"
-                android:lineSpacingExtra="4dp"
-                android:textAppearance="?attr/textAppearanceBodySmall"
+                android:text="@string/no_jobs"
                 android:textColor="?attr/colorOnSurfaceVariant" />
+
+            <LinearLayout
+                android:id="@+id/jobHistory"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:orientation="vertical" />
         </LinearLayout>
     </com.google.android.material.card.MaterialCardView>
 </LinearLayout>

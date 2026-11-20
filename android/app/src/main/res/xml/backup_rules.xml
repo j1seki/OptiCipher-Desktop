@@ -5,4 +5,5 @@
 <full-backup-content>
     <exclude domain="sharedpref" path="." />
     <exclude domain="file" path="private_outputs/" />
+    <exclude domain="database" path="job_journal.db" />
 </full-backup-content>

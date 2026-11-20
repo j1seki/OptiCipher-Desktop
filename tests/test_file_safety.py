@@ -20,7 +20,9 @@ from __future__ import annotations
 
 import hashlib
 import os
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from threading import Barrier
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -87,6 +89,24 @@ def test_save_leaves_no_temp_files_behind(tmp_path):
         p for p in tmp_path.iterdir() if p.name != "clean.png"
     ]
     assert leftovers == [], f"temp files left behind: {leftovers}"
+
+
+def test_simultaneous_saves_publish_distinct_files(tmp_path, monkeypatch):
+    barrier = Barrier(2, timeout=5)
+    original = Image.Image.save
+
+    def synchronized_save(image, *args, **kwargs):
+        barrier.wait()
+        return original(image, *args, **kwargs)
+
+    monkeypatch.setattr(Image.Image, "save", synchronized_save)
+    destination = tmp_path / "result.png"
+    with ThreadPoolExecutor(max_workers=2) as workers:
+        first = workers.submit(save_image, _img(1), destination)
+        second = workers.submit(save_image, _img(2), destination)
+        assert {first.result().name, second.result().name} == {"result.png", "result_2.png"}
+    np.testing.assert_array_equal(load_image(first.result()), _img(1))
+    np.testing.assert_array_equal(load_image(second.result()), _img(2))
 
 
 def test_failed_save_keeps_previous_file_and_no_partial(tmp_path, monkeypatch):

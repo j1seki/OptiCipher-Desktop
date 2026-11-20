@@ -5,48 +5,61 @@ import android.app.TimePickerDialog
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.graphics.Bitmap
-import android.graphics.drawable.BitmapDrawable
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import android.text.method.ScrollingMovementMethod
+import android.text.InputType
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
 import android.widget.CompoundButton
+import android.widget.EditText
+import android.widget.AdapterView
+import android.widget.ArrayAdapter
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ProgressBar
 import android.widget.ScrollView
+import android.widget.Spinner
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import androidx.appcompat.app.AppCompatDelegate
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
+import androidx.core.widget.doAfterTextChanged
 import androidx.core.view.ViewCompat
+import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.coordinatorlayout.widget.CoordinatorLayout
 import androidx.documentfile.provider.DocumentFile
+import androidx.lifecycle.ViewModelProvider
 import com.google.android.material.appbar.MaterialToolbar
 import com.google.android.material.bottomnavigation.BottomNavigationView
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.checkbox.MaterialCheckBox
 import com.google.android.material.chip.ChipGroup
+import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.android.material.materialswitch.MaterialSwitch
 import com.google.android.material.slider.Slider
 import com.google.android.material.textfield.TextInputEditText
+import com.google.android.material.textfield.TextInputLayout
 import java.io.File
 
 class MainActivity : AppCompatActivity() {
     private val queue = mutableListOf<Uri>()
     private var manualOutputUri: Uri? = null
+    private var onSftpKeyPicked: ((Uri) -> Unit)? = null
     private var mode = "encrypt"
+    private lateinit var batch: BatchSession
     private var batchRunning = false
+    private var renderedBatchId: String? = null
     private var pendingFolderMode: String? = null
     private var pendingOutputMode: String? = null
     // First-run setup requests a scoped SAF folder grant. Android deliberately
@@ -54,10 +67,14 @@ class MainActivity : AppCompatActivity() {
     // the operating system's folder-permission prompt.
     private var onboardingStep: OnboardingStep? = null
     private lateinit var passInput: TextInputEditText
+    private lateinit var confirmInput: TextInputEditText
+    private var shownAnalysis: ImageAnalysis? = null
     private lateinit var iterSlider: Slider
     private lateinit var iterLabel: TextView
     private lateinit var queueView: TextView
     private lateinit var startBtn: MaterialButton
+    private lateinit var stopBtn: MaterialButton
+    private lateinit var settingsBack: OnBackPressedCallback
     private lateinit var results: LinearLayout
     private lateinit var preview: ImageView
     private lateinit var manualOutView: TextView
@@ -65,12 +82,12 @@ class MainActivity : AppCompatActivity() {
     private lateinit var batchDetail: TextView
     private lateinit var batchProgress: com.google.android.material.progressindicator.LinearProgressIndicator
     private lateinit var updateStatus: TextView
-    private lateinit var updateBtn: MaterialButton
-    private val progressListener = android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
-        if (key?.startsWith("live_") == true) runOnUiThread { refreshLiveProgress() }
-    }
+    private lateinit var updateBtn: View
+    private lateinit var logsPanel: LogsPanel
     private val watchProgressListener = android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
-        if (key?.endsWith("_live") == true) runOnUiThread { refreshWatchProgress() }
+        runOnUiThread {
+            if (key?.endsWith("_live") == true) refreshWatchProgress()
+        }
     }
 
     private val pickFiles = registerForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
@@ -85,6 +102,9 @@ class MainActivity : AppCompatActivity() {
             getSharedPreferences("manual", Context.MODE_PRIVATE).edit().putString("output_uri", uri.toString()).apply()
             refreshOutputs()
         }
+    }
+    private val pickSftpKey = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) onSftpKeyPicked?.invoke(uri)
     }
     private val pickWatchFolder = registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
         val watchMode = pendingFolderMode
@@ -101,6 +121,7 @@ class MainActivity : AppCompatActivity() {
                     // Changing a watched tree must not retain processed URIs
                     // from the previous tree. Re-scan the newly selected inbox.
                     FolderWatcher.resetProcessed(this, watchMode)
+                    if (!FolderWatcher.processExisting(this, watchMode)) FolderWatcher.markExistingProcessed(this, watchMode)
                     FolderWatcher.startWatching(this, watchMode)
                 }
             } else {
@@ -118,7 +139,9 @@ class MainActivity : AppCompatActivity() {
             if (uri != null) {
                 takePersistable(uri); FolderWatcher.setOutputTree(this, watchMode, uri)
                 refreshWatch(watchMode); toast("Auto-$watchMode output folder chosen")
-                if (FolderWatcher.isWatching(this, watchMode)) FolderWatcher.enqueue(this, watchMode)
+                if (FolderWatcher.isWatching(this, watchMode) && !FolderWatcher.isWeekly(this, watchMode)) {
+                    FolderWatcher.enqueue(this, watchMode, replace = true)
+                }
                 if (onboardingStep == OnboardingStep.ENCRYPT_OUTPUT && watchMode == FolderWatcher.ENCRYPT) completeFolderSetup()
             } else {
                 if (onboardingStep == OnboardingStep.ENCRYPT_OUTPUT) {
@@ -134,7 +157,7 @@ class MainActivity : AppCompatActivity() {
     private var reopenPermissions = false
 
     private val requestNotifications = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-        toast(if (granted) "Notifications enabled" else "Notifications off — background results still appear in Activity")
+        toast(if (granted) "Notifications enabled" else "Notifications off · Results are available in Logs")
         if (reopenPermissions) { reopenPermissions = false; showPermissionsDialog() }
     }
     private val requestImages = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
@@ -155,9 +178,14 @@ class MainActivity : AppCompatActivity() {
         const val STATE_PENDING_FOLDER = "pending_folder_mode"
         const val STATE_PENDING_OUTPUT = "pending_output_mode"
         const val STATE_MODE = "batch_mode"
+        const val STATE_QUEUE = "batch_queue"
+        const val STATE_WORKSPACE = "workspace"
+        const val STATE_SETTINGS = "settings_open"
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        val theme = getSharedPreferences("appearance", Context.MODE_PRIVATE).getInt("theme", AppCompatDelegate.MODE_NIGHT_YES)
+        delegate.localNightMode = theme
         super.onCreate(savedInstanceState)
         enableEdgeToEdge(); setContentView(R.layout.activity_main)
         applyInsets()
@@ -165,10 +193,14 @@ class MainActivity : AppCompatActivity() {
         androidx.work.WorkManager.getInstance(this).cancelUniqueWork("weekly-batch")
         FolderWatcher.setRememberPassphrase(this, "scheduled_batch", false)
         FolderWatcher.clearStoredPassphrase(this, "scheduled_batch")
-        migrateExistingWatchDefaults()
+        batch = ViewModelProvider(this)[BatchSession::class.java]
         passInput = findViewById(R.id.pass); iterSlider = findViewById(R.id.iter); iterLabel = findViewById(R.id.iterLabel)
+        confirmInput = findViewById(R.id.batchConfirm)
+        passInput.doAfterTextChanged { findViewById<TextInputLayout>(R.id.batchPassLayout).error = null }
+        confirmInput.doAfterTextChanged { findViewById<TextInputLayout>(R.id.batchConfirmLayout).error = null }
         findViewById<MaterialButton>(R.id.batchGenerate).setOnClickListener { generatePassphrase(passInput) }
         queueView = findViewById(R.id.queueView); startBtn = findViewById(R.id.startBtn)
+        stopBtn = findViewById(R.id.batchCancel)
         results = findViewById(R.id.results); preview = findViewById(R.id.preview); manualOutView = findViewById(R.id.manualOutView)
         batchStatus = findViewById(R.id.batchStatus); batchDetail = findViewById(R.id.batchDetail); batchProgress = findViewById(R.id.batchProgress)
         manualOutputUri = getSharedPreferences("manual", Context.MODE_PRIVATE).getString("output_uri", null)?.let(Uri::parse)
@@ -176,16 +208,32 @@ class MainActivity : AppCompatActivity() {
         pendingFolderMode = savedInstanceState?.getString(STATE_PENDING_FOLDER)
         pendingOutputMode = savedInstanceState?.getString(STATE_PENDING_OUTPUT)
         mode = savedInstanceState?.getString(STATE_MODE) ?: "encrypt"
+        queue.addAll(savedInstanceState?.getStringArrayList(STATE_QUEUE).orEmpty().map(Uri::parse))
         iterSlider.value = 200000f; updateIterLabel(); iterSlider.addOnChangeListener { _, _, _ -> updateIterLabel() }
 
         val modeGroup = findViewById<ChipGroup>(R.id.modeGroup)
-        modeGroup.check(when (mode) { "decrypt" -> R.id.modeDecrypt; "verify" -> R.id.modeVerify; else -> R.id.modeEncrypt })
+        modeGroup.check(when (mode) {
+            "decrypt" -> R.id.modeDecrypt
+            "verify" -> R.id.modeVerify
+            "analyze" -> R.id.modeAnalyze
+            else -> R.id.modeEncrypt
+        })
         modeGroup.setOnCheckedStateChangeListener { _, ids ->
-            mode = when (ids.firstOrNull()) { R.id.modeDecrypt -> "decrypt"; R.id.modeVerify -> "verify"; else -> "encrypt" }; refreshQueue()
+            mode = when (ids.firstOrNull()) {
+                R.id.modeDecrypt -> "decrypt"
+                R.id.modeVerify -> "verify"
+                R.id.modeAnalyze -> "analyze"
+                else -> "encrypt"
+            }
+            refreshBatchMode()
+            refreshQueue()
         }
+        refreshBatchMode()
+        refreshSftpButton()
         findViewById<MaterialButton>(R.id.pickBtn).setOnClickListener { pickFiles.launch(arrayOf("image/*")) }
         findViewById<MaterialButton>(R.id.pickFolderBtn).setOnClickListener { pickBatchFolder.launch(null) }
         findViewById<MaterialButton>(R.id.outputBtn).setOnClickListener { pickBatchOutput.launch(null) }
+        findViewById<MaterialButton>(R.id.batchSftp).setOnClickListener { showSftp() }
         val privateOutput = findViewById<MaterialSwitch>(R.id.privateOutput)
         privateOutput.isChecked = getSharedPreferences("manual", Context.MODE_PRIVATE).getBoolean("private_output", false)
         privateOutput.setOnCheckedChangeListener { _, checked ->
@@ -193,67 +241,92 @@ class MainActivity : AppCompatActivity() {
             refreshOutputs()
         }
         findViewById<MaterialButton>(R.id.privateFilesBtn).setOnClickListener { showPrivateFiles() }
-        BatchSchedule.prefs(this).registerOnSharedPreferenceChangeListener(progressListener)
+        batch.state.observe(this, ::renderBatch)
         getSharedPreferences("folder_watch", Context.MODE_PRIVATE).registerOnSharedPreferenceChangeListener(watchProgressListener)
-        refreshLiveProgress()
+        batch.lastStatus(this)?.let(::renderBatch)
         refreshWatchProgress()
         findViewById<MaterialButton>(R.id.clearQueueBtn).setOnClickListener { queue.clear(); refreshQueue() }
         startBtn.setOnClickListener { startBatch() }
+        stopBtn.setOnClickListener {
+            batch.stopAfterCurrentFile()
+            refreshQueue()
+        }
         findViewById<MaterialButton>(R.id.batchCheckBtn).setOnClickListener { runBatchCheck() }
         setupWatch(FolderWatcher.ENCRYPT)
         setupWatch(FolderWatcher.DECRYPT)
-        // Re-register the live observers after the process was recreated.
-        if (FolderWatcher.isWatching(this, FolderWatcher.ENCRYPT) && !FolderWatcher.isWeekly(this, FolderWatcher.ENCRYPT)) FolderWatcher.startWatching(this, FolderWatcher.ENCRYPT)
-        if (FolderWatcher.isWatching(this, FolderWatcher.DECRYPT) && !FolderWatcher.isWeekly(this, FolderWatcher.DECRYPT)) FolderWatcher.startWatching(this, FolderWatcher.DECRYPT)
-        if (FolderWatcher.isWatching(this, FolderWatcher.ENCRYPT) || FolderWatcher.isWatching(this, FolderWatcher.DECRYPT)) WatchService.start(this)
-        setupNav()
-        findViewById<MaterialToolbar>(R.id.toolbar).setOnMenuItemClickListener { item ->
-            if (item.itemId == R.id.action_settings) { showSettings(); true } else false
+        FolderWatcher.MODES.forEach { WeeklyWatch.migrate(this, it) }
+        WatchService.update(this)
+        setupSettings()
+        val logsPage = findViewById<View>(R.id.activityPage)
+        logsPanel = LogsPanel(logsPage)
+        JobJournal.get(this).changes.observe(this) {
+            if (logsPage.visibility == View.VISIBLE) refreshLogs()
         }
-        findViewById<MaterialToolbar>(R.id.toolbar).menu.findItem(R.id.action_settings)?.icon?.setTint(ContextCompat.getColor(this, R.color.brand_on_surface))
-        findViewById<MaterialButton>(R.id.permissionsBtn).setOnClickListener { showPermissionsDialog() }
-        updateStatus = findViewById(R.id.updateStatus)
-        updateBtn = findViewById(R.id.updateBtn)
-        updateStatus.text = "Installed version: ${Updater.currentVersion(this)}"
-        updateBtn.setOnClickListener { checkForUpdates() }
-        findViewById<MaterialButton>(R.id.refreshLogBtn).setOnClickListener { refreshActivity() }
-        findViewById<MaterialButton>(R.id.clearLogBtn).setOnClickListener { FolderWatcher.clearActivityLog(this); refreshActivity() }
+        setupNav(savedInstanceState)
         refreshQueue(); refreshOutputs(); refreshWatch(FolderWatcher.ENCRYPT); refreshWatch(FolderWatcher.DECRYPT)
-        refreshActivity()
-        handleShareIntent(intent)
+        if (savedInstanceState == null) handleShareIntent(intent)
         showFirstRunSetupIfNeeded()
     }
 
-    private fun setupNav() {
+    private fun setupNav(savedState: Bundle?) {
         val nav = findViewById<BottomNavigationView>(R.id.bottomNav)
-        val batch = findViewById<View>(R.id.batchPage)
-        val watch = findViewById<View>(R.id.watchPage)
-        val activity = findViewById<View>(R.id.activityPage)
-        val fab = findViewById<View>(R.id.startBtn)
-        fun show(id: Int) {
-            batch.visibility = if (id == R.id.nav_batch) View.VISIBLE else View.GONE
-            watch.visibility = if (id == R.id.nav_watch) View.VISIBLE else View.GONE
-            activity.visibility = if (id == R.id.nav_activity) View.VISIBLE else View.GONE
-            fab.visibility = if (id == R.id.nav_batch) View.VISIBLE else View.GONE
-            if (id == R.id.nav_activity) refreshActivity()
+        val toolbar = findViewById<MaterialToolbar>(R.id.toolbar)
+        settingsBack = object : OnBackPressedCallback(false) {
+            override fun handleOnBackPressed() = showWorkspace(nav.selectedItemId)
         }
-        nav.setOnItemSelectedListener { show(it.itemId); true }
-        nav.setOnItemReselectedListener { if (it.itemId == R.id.nav_activity) refreshActivity() }
-        nav.selectedItemId = R.id.nav_batch
+        onBackPressedDispatcher.addCallback(this, settingsBack)
+        toolbar.setNavigationOnClickListener { showWorkspace(nav.selectedItemId) }
+        toolbar.setOnMenuItemClickListener { item ->
+            if (item.itemId == R.id.action_settings) {
+                showPage(R.id.settingsPage)
+                true
+            } else false
+        }
+        toolbar.menu.findItem(R.id.action_settings)?.icon?.setTint(ContextCompat.getColor(this, R.color.brand_on_surface))
+        nav.setOnItemSelectedListener { showWorkspace(it.itemId); true }
+        nav.setOnItemReselectedListener { if (it.itemId == R.id.nav_activity) refreshLogs() }
+        nav.selectedItemId = savedState?.getInt(STATE_WORKSPACE, R.id.nav_batch) ?: R.id.nav_batch
+        showWorkspace(nav.selectedItemId)
+        if (savedState?.getBoolean(STATE_SETTINGS) == true) showPage(R.id.settingsPage)
     }
 
-    /** Keep the bottom navigation and FAB above Android's gesture/navigation bar. */
+    private fun showWorkspace(destination: Int) {
+        showPage(when (destination) {
+            R.id.nav_watch -> R.id.watchPage
+            R.id.nav_activity -> R.id.activityPage
+            else -> R.id.batchPage
+        })
+    }
+
+    private fun showPage(page: Int) {
+        val settings = page == R.id.settingsPage
+        val toolbar = findViewById<MaterialToolbar>(R.id.toolbar)
+        for (id in intArrayOf(R.id.batchPage, R.id.watchPage, R.id.activityPage, R.id.settingsPage)) {
+            findViewById<View>(id).visibility = if (page == id) View.VISIBLE else View.GONE
+        }
+        findViewById<BottomNavigationView>(R.id.bottomNav).visibility = if (settings) View.GONE else View.VISIBLE
+        settingsBack.isEnabled = settings
+        toolbar.setTitle(if (settings) R.string.settings_title else R.string.app_title)
+        toolbar.menu.findItem(R.id.action_settings).isVisible = !settings
+        if (settings) {
+            toolbar.setNavigationIcon(R.drawable.ic_arrow_back)
+            toolbar.setNavigationContentDescription(R.string.settings_back_description)
+        } else {
+            toolbar.navigationIcon = null
+        }
+        if (page == R.id.activityPage) refreshLogs()
+        ViewCompat.requestApplyInsets(findViewById(R.id.root))
+    }
+
+    /** Leave space for the system bars and the workspace navigation. */
     private fun applyInsets() {
         val root = findViewById<View>(R.id.root)
         val nav = findViewById<BottomNavigationView>(R.id.bottomNav)
         val content = findViewById<View>(R.id.contentFrame)
-        val fab = findViewById<View>(R.id.startBtn)
         val density = resources.displayMetrics.density
         val navBase = (80 * density).toInt()
-        val fabBase = (96 * density).toInt()
-        ViewCompat.setOnApplyWindowInsetsListener(root) { view, insets ->
+        ViewCompat.setOnApplyWindowInsetsListener(root) { _, insets ->
             val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
-            view.setPadding(0, 0, 0, 0)
             (findViewById<View>(R.id.appBar).layoutParams as? CoordinatorLayout.LayoutParams)?.let { params ->
                 params.topMargin = bars.top
                 findViewById<View>(R.id.appBar).layoutParams = params
@@ -261,54 +334,72 @@ class MainActivity : AppCompatActivity() {
             nav.setPadding(nav.paddingLeft, nav.paddingTop, nav.paddingRight, bars.bottom)
             nav.layoutParams = nav.layoutParams.apply { height = navBase + bars.bottom }
             content.layoutParams = (content.layoutParams as CoordinatorLayout.LayoutParams).apply {
-                bottomMargin = navBase + bars.bottom
-            }
-            fab.layoutParams = (fab.layoutParams as CoordinatorLayout.LayoutParams).apply {
-                bottomMargin = fabBase + bars.bottom
+                bottomMargin = bars.bottom + if (nav.visibility == View.VISIBLE) navBase else 0
             }
             insets
         }
     }
 
-    /** v1.4.3: process existing inbox items by default, including upgraded installs. */
-    private fun migrateExistingWatchDefaults() {
-        val prefs = getSharedPreferences("folder_watch", Context.MODE_PRIVATE)
-        if (prefs.getInt("watch_schema", 0) < 3) {
-            prefs.edit()
-                .putBoolean("encrypt_process_existing", true)
-                .putBoolean("decrypt_process_existing", true)
-                .putInt("watch_schema", 3)
-                .apply()
-            FolderWatcher.resetProcessed(this, FolderWatcher.ENCRYPT)
-            FolderWatcher.resetProcessed(this, FolderWatcher.DECRYPT)
-        }
-    }
-
-    private fun refreshActivity() {
+    private fun refreshLogs() {
         val encrypt = if (FolderWatcher.isWatching(this, FolderWatcher.ENCRYPT)) "●  Auto-encrypt  ·  On" else "○  Auto-encrypt  ·  Off"
         val decrypt = if (FolderWatcher.isWatching(this, FolderWatcher.DECRYPT)) "●  Auto-decrypt  ·  On" else "○  Auto-decrypt  ·  Off"
         findViewById<TextView>(R.id.backgroundStatus).text = "$encrypt\n$decrypt"
-        val lines = FolderWatcher.activityLog(this)
-        findViewById<TextView>(R.id.activityLog).text = if (lines.isEmpty()) "No activity yet" else lines.joinToString("\n")
+        logsPanel.refresh()
     }
 
-    private fun showSettings() {
-        val options = arrayOf("Permissions & battery", "Check for updates", "Source code", "About OptiCipher")
-        AlertDialog.Builder(this)
-            .setTitle("Settings")
-            .setItems(options) { _, which ->
-                when (which) {
-                    0 -> showPermissionsDialog()
-                    1 -> {
-                        checkForUpdates()
-                        findViewById<BottomNavigationView>(R.id.bottomNav).selectedItemId = R.id.nav_activity
-                    }
-                    2 -> startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/j1seki/OptiCipher-Desktop")))
-                    3 -> AlertDialog.Builder(this).setTitle("OptiCipher")
-                        .setMessage("Version ${Updater.currentVersion(this)}\nPrivate, on-device image encryption.")
-                        .setPositiveButton("Close", null).show()
-                }
-            }.show()
+    private fun setupSettings() {
+        fun bind(id: Int, title: Int, icon: Int, summary: String? = null, action: () -> Unit): View {
+            val row = findViewById<View>(id)
+            row.findViewById<TextView>(R.id.settingTitle).setText(title)
+            row.findViewById<ImageView>(R.id.settingIcon).setImageResource(icon)
+            row.findViewById<TextView>(R.id.settingSummary).apply {
+                text = summary
+                visibility = if (summary.isNullOrEmpty()) View.GONE else View.VISIBLE
+            }
+            row.setOnClickListener { action() }
+            return row
+        }
+
+        bind(R.id.settingTheme, R.string.settings_theme, R.drawable.ic_tune, themeNames()[themeIndex()]) {
+            showAppearance()
+        }
+        bind(R.id.permissionsBtn, R.string.settings_permissions, R.drawable.ic_shield, getString(R.string.settings_permissions_detail)) {
+            showPermissionsDialog()
+        }
+        updateBtn = bind(R.id.updateBtn, R.string.settings_updates, R.drawable.ic_update) { checkForUpdates() }
+        updateStatus = updateBtn.findViewById<TextView>(R.id.settingSummary).apply {
+            accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
+        }
+        val version = getString(R.string.settings_version, Updater.currentVersion(this))
+        bind(R.id.settingAbout, R.string.settings_about, R.drawable.ic_info, version) {
+            MaterialAlertDialogBuilder(this).setTitle(R.string.app_title)
+                .setMessage("$version\nPrivate, on-device image encryption.")
+                .setPositiveButton(android.R.string.ok, null).show()
+        }
+        val source = bind(R.id.settingSource, R.string.settings_source, R.drawable.ic_code) {
+            try {
+                startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/j1seki/OptiCipher-Desktop")))
+            } catch (_: android.content.ActivityNotFoundException) {
+                toast(getString(R.string.settings_source_unavailable))
+            }
+        }
+        source.findViewById<ImageView>(R.id.settingIndicator).setImageResource(R.drawable.ic_open_in_new)
+    }
+
+    private val themeModes = intArrayOf(AppCompatDelegate.MODE_NIGHT_YES, AppCompatDelegate.MODE_NIGHT_NO, AppCompatDelegate.MODE_NIGHT_FOLLOW_SYSTEM)
+    private fun themeNames() = arrayOf(getString(R.string.theme_dark), getString(R.string.theme_light), getString(R.string.theme_system))
+    private fun themeIndex() = themeModes.indexOf(delegate.localNightMode).coerceAtLeast(0)
+
+    private fun showAppearance() {
+        val preferences = getSharedPreferences("appearance", Context.MODE_PRIVATE)
+        val names = themeNames()
+        MaterialAlertDialogBuilder(this).setTitle(R.string.settings_theme)
+            .setSingleChoiceItems(names, themeIndex()) { dialog, index ->
+                preferences.edit().putInt("theme", themeModes[index]).apply()
+                findViewById<View>(R.id.settingTheme).findViewById<TextView>(R.id.settingSummary).text = names[index]
+                dialog.dismiss()
+                delegate.localNightMode = themeModes[index]
+            }.setNegativeButton(android.R.string.cancel, null).show()
     }
 
     private data class WatchIds(val pass: Int, val remember: Int, val folderText: Int, val folderButton: Int, val outputButton: Int,
@@ -344,7 +435,10 @@ class MainActivity : AppCompatActivity() {
                 if (pass.text.isNullOrEmpty()) toast("Enter a passphrase to remember it")
                 else if (!FolderWatcher.storePassphraseIfEnabled(this, watchMode, pass.text.toString()))
                     toast("Could not store the passphrase securely on this device")
-            } else FolderWatcher.clearStoredPassphrase(this, watchMode)
+            } else {
+                watchSwitch.isChecked = false
+                FolderWatcher.clearStoredPassphrase(this, watchMode)
+            }
         }
         existing.setOnCheckedChangeListener { _, checked -> FolderWatcher.setProcessExisting(this, watchMode, checked) }
         findViewById<MaterialButton>(i.folderButton).setOnClickListener { pendingFolderMode = watchMode; pickWatchFolder.launch(null) }
@@ -362,14 +456,17 @@ class MainActivity : AppCompatActivity() {
             val minutes = when (chosen.firstOrNull()) { i.hour -> 60; i.sixHours -> 360; i.twelveHours -> 720; i.day -> 1440; else -> 15 }
             FolderWatcher.setIntervalSchedule(this, watchMode)
             FolderWatcher.setIntervalMinutes(this, watchMode, minutes)
-            if (FolderWatcher.isWatching(this, watchMode)) FolderWatcher.startWatching(this, watchMode)
+            if (FolderWatcher.isWatching(this, watchMode)) {
+                FolderWatcher.startWatching(this, watchMode)
+                WatchService.update(this)
+            }
             refreshWatch(watchMode)
         }
         watchSwitch.setOnCheckedChangeListener { _, checked ->
             if (checked) startWatch(watchMode, pass, remember, existing, watchSwitch)
             else {
                 FolderWatcher.stopWatching(this, watchMode)
-                WatchService.stopIfIdle(this)
+                WatchService.update(this)
                 refreshWatch(watchMode)
             }
         }
@@ -408,7 +505,7 @@ class MainActivity : AppCompatActivity() {
         ensureNotificationPermission()
         val begin = {
             FolderWatcher.startWatching(this, watchMode)
-            WatchService.start(this)
+            WatchService.update(this)
             refreshWatch(watchMode)
             toast("Auto-$watchMode is on")
         }
@@ -493,7 +590,10 @@ class MainActivity : AppCompatActivity() {
         val i = ids(watchMode); val inbox = FolderWatcher.getInbox(this, watchMode); val out = FolderWatcher.getOutputTree(this, watchMode)
         findViewById<TextView>(i.folderText).text = "In: ${inbox?.let(::folderLabel) ?: "not selected"}\nOut: ${out?.let(::folderLabel) ?: "app storage"}"
         val every = if (FolderWatcher.isWeekly(this, watchMode)) FolderWatcher.weeklyLabel(this, watchMode) else when (FolderWatcher.getIntervalMinutes(this, watchMode)) { 60 -> "every hour"; 360 -> "every 6 hours"; 720 -> "every 12 hours"; 1440 -> "daily"; else -> "every 15 min" }
-        findViewById<TextView>(i.status).text = if (FolderWatcher.isWatching(this, watchMode)) "On · $every" else "Off"
+        val watching = FolderWatcher.isWatching(this, watchMode)
+        findViewById<TextView>(i.status).text = if (watching) "On · $every" else "Off"
+        findViewById<TextInputEditText>(i.pass).isEnabled = !watching
+        findViewById<MaterialButton>(if (watchMode == FolderWatcher.ENCRYPT) R.id.encryptGenerate else R.id.decryptGenerate).isEnabled = !watching
         findViewById<MaterialButton>(if (watchMode == FolderWatcher.ENCRYPT) R.id.encryptWeekly else R.id.decryptWeekly).text = if (FolderWatcher.isWeekly(this, watchMode)) "$every · change" else "Schedule weekday and time"
     }
 
@@ -503,10 +603,14 @@ class MainActivity : AppCompatActivity() {
             TimePickerDialog(this, { _, hour, minute ->
                 FolderWatcher.setWeekly(this, watchMode, day + 1, hour, minute)
                 findViewById<ChipGroup>(ids(watchMode).interval).clearCheck()
-                if (FolderWatcher.isWatching(this, watchMode)) FolderWatcher.startWatching(this, watchMode)
+                if (FolderWatcher.isWatching(this, watchMode)) {
+                    FolderWatcher.startWatching(this, watchMode)
+                    WatchService.update(this)
+                }
                 refreshWatch(watchMode)
                 toast("Weekly schedule set; Android may delay the scan")
-            }, 9, 0, true).show()
+            }, FolderWatcher.weeklyTime(this, watchMode).hour, FolderWatcher.weeklyTime(this, watchMode).minute,
+                android.text.format.DateFormat.is24HourFormat(this)).show()
         }.setNegativeButton("Cancel", null).show()
     }
 
@@ -518,12 +622,14 @@ class MainActivity : AppCompatActivity() {
             .setMessage("$value\n\nSave this somewhere safe. You need the same passphrase to decrypt; it cannot be recovered if lost.")
             .setPositiveButton("Use passphrase") { _, _ ->
                 field.setText(value)
+                if (field.id == R.id.pass) confirmInput.setText(value)
                 if (field.id == R.id.encryptWatchPass && FolderWatcher.isRemembering(this, FolderWatcher.ENCRYPT)) FolderWatcher.storePassphraseIfEnabled(this, FolderWatcher.ENCRYPT, value)
                 if (field.id == R.id.decryptWatchPass && FolderWatcher.isRemembering(this, FolderWatcher.DECRYPT)) FolderWatcher.storePassphraseIfEnabled(this, FolderWatcher.DECRYPT, value)
             }.setNegativeButton("Cancel", null).show()
     }
 
     private fun readyStatus(viewId: Int, passed: Boolean, details: String) {
+        if (isFinishing || isDestroyed) return
         val status = findViewById<TextView>(viewId)
         status.text = if (passed) "✓ Ready\n$details" else "✗ Needs attention\n$details"
         val heading = if (passed) "READY" else "NOT READY"
@@ -533,6 +639,8 @@ class MainActivity : AppCompatActivity() {
     /** Fast no-file test for the manual flow: crypto roundtrip plus output-folder access. */
     private fun runBatchCheck() {
         val status = findViewById<TextView>(R.id.batchCheckStatus); status.text = "Testing batch setup…"
+        val privateOutput = getSharedPreferences("manual", Context.MODE_PRIVATE).getBoolean("private_output", false)
+        val pickedOutput = manualOutputUri.takeUnless { privateOutput }
         Thread {
             val findings = mutableListOf<String>()
             var ok = true
@@ -542,10 +650,15 @@ class MainActivity : AppCompatActivity() {
                 if (!roundtrip.pixels.contentEquals(tiny.pixels)) error("crypto round-trip did not match")
                 findings += "✓ encryption test passed"
             } catch (e: Exception) { ok = false; findings += "✗ encryption test: ${e.message}" }
-            if (manualOutputUri != null) {
-                val tree = DocumentFile.fromTreeUri(this, manualOutputUri!!)
+            if (pickedOutput != null) {
+                val tree = DocumentFile.fromTreeUri(this, pickedOutput)
                 if (tree?.canWrite() == true) findings += "✓ batch output folder writable" else { ok = false; findings += "✗ batch output folder is not writable" }
-            } else findings += "✓ app storage output available"
+            } else if (privateOutput || getExternalFilesDir(null)?.canWrite() == true) {
+                findings += if (privateOutput) "✓ private folder storage available" else "✓ app storage output available"
+            } else {
+                ok = false
+                findings += "✗ app storage output is unavailable"
+            }
             runOnUiThread { readyStatus(R.id.batchCheckStatus, ok, findings.joinToString("\n")) }
         }.start()
     }
@@ -572,12 +685,12 @@ class MainActivity : AppCompatActivity() {
             } catch (e: Exception) { ok = false; findings += "✗ crypto self-test: ${e.message}" }
             val notificationsOn = Build.VERSION.SDK_INT < 33 ||
                 ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
-            note(notificationsOn, "notifications enabled", "notifications are off — background results will only appear in Activity")
+            note(notificationsOn, "notifications enabled", "notifications are off · Background results are available in Logs")
             val batteryOk = getSystemService(android.os.PowerManager::class.java)?.isIgnoringBatteryOptimizations(packageName) != false
             note(batteryOk, "battery optimisation exemption granted", "battery optimisation may delay background checks")
             val heapMb = Runtime.getRuntime().maxMemory() / (1024 * 1024)
             findings += "✓ device processing heap: ${heapMb} MB"
-            findings += "Large photos may exceed this device’s memory limit; the app will identify them in Activity."
+            findings += "Logs reports images that exceed this device’s processing limit."
             runOnUiThread { readyStatus(i.checkStatus, ok, findings.joinToString("\n")) }
         }.start()
     }
@@ -588,6 +701,9 @@ class MainActivity : AppCompatActivity() {
         outState.putString(STATE_PENDING_FOLDER, pendingFolderMode)
         outState.putString(STATE_PENDING_OUTPUT, pendingOutputMode)
         outState.putString(STATE_MODE, mode)
+        outState.putStringArrayList(STATE_QUEUE, ArrayList(queue.map(Uri::toString)))
+        outState.putInt(STATE_WORKSPACE, findViewById<BottomNavigationView>(R.id.bottomNav).selectedItemId)
+        outState.putBoolean(STATE_SETTINGS, settingsBack.isEnabled)
     }
 
     override fun onNewIntent(intent: Intent) { super.onNewIntent(intent); handleShareIntent(intent) }
@@ -623,11 +739,110 @@ class MainActivity : AppCompatActivity() {
         }
     }
     private fun updateIterLabel() { iterLabel.text = "${iterSlider.value.toInt()} iterations" }
-    private fun actionLabel() = when (mode) { "encrypt" -> "Encrypt files"; "decrypt" -> "Decrypt files"; else -> "Verify files" }
+    private fun actionLabel() = when (mode) {
+        "encrypt" -> R.string.batch_encrypt
+        "decrypt" -> R.string.batch_decrypt
+        "analyze" -> R.string.batch_analyze
+        else -> R.string.batch_verify
+    }
+    private fun refreshBatchMode() {
+        val encrypt = mode == "encrypt"
+        val writes = encrypt || mode == "decrypt"
+        val visibility = if (encrypt) View.VISIBLE else View.GONE
+        for (id in listOf(R.id.batchConfirmLayout, R.id.batchGenerate, R.id.batchKdfLabelRow, R.id.iter)) {
+            findViewById<View>(id).visibility = visibility
+        }
+        findViewById<View>(R.id.batchSecretCard).visibility = if (mode == "analyze") View.GONE else View.VISIBLE
+        findViewById<View>(R.id.batchDestinationCard).visibility = if (writes) View.VISIBLE else View.GONE
+        findViewById<View>(R.id.batchSftp).visibility = if (writes) View.VISIBLE else View.GONE
+        findViewById<View>(R.id.privateOutput).visibility = if (writes) View.VISIBLE else View.GONE
+        findViewById<View>(R.id.privateOutputHint).visibility = if (writes) View.VISIBLE else View.GONE
+        findViewById<TextInputLayout>(R.id.batchPassLayout).apply {
+            hint = if (mode == "verify") "Passphrase (optional for format check)" else "Passphrase"
+            error = null
+        }
+        findViewById<TextInputLayout>(R.id.batchConfirmLayout).error = null
+    }
+
+    private fun showSftp() {
+        val old = batch.sftp
+        var identity = old?.identity
+        val form = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            val margin = (20 * resources.displayMetrics.density).toInt()
+            setPadding(margin, 0, margin, 0)
+        }
+        fun field(label: String, value: String, type: Int): EditText = EditText(this).apply {
+            hint = label
+            contentDescription = label
+            inputType = type
+            setText(value)
+            form.addView(this)
+        }
+        val address = field("sftp://user@host/folder", old?.address.orEmpty(), InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI)
+        val hostKey = field("Trusted server public key", old?.hostKey.orEmpty(), InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS)
+        val password = field("SSH password or key passphrase", old?.password.orEmpty(), InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD)
+        val identityButton = MaterialButton(this).apply { text = if (identity == null) "Choose SSH private key" else "Change SSH private key" }
+        val usePassword = MaterialButton(this).apply { text = "Use password instead"; visibility = if (identity == null) View.GONE else View.VISIBLE }
+        form.addView(identityButton)
+        form.addView(usePassword)
+        identityButton.setOnClickListener {
+            onSftpKeyPicked = { uri ->
+                identity = uri
+                identityButton.text = "Change SSH private key"
+                usePassword.visibility = View.VISIBLE
+            }
+            pickSftpKey.launch(arrayOf("*/*"))
+        }
+        usePassword.setOnClickListener {
+            identity = null
+            identityButton.text = "Choose SSH private key"
+            usePassword.visibility = View.GONE
+        }
+        val scroll = ScrollView(this).apply { addView(form) }
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("SFTP copy")
+            .setMessage("Each result is saved locally first. Paste the server public key from a trusted source.")
+            .setView(scroll)
+            .setPositiveButton("Use SFTP", null)
+            .setNegativeButton("Cancel", null)
+            .setNeutralButton("Turn off") { _, _ -> batch.sftp = null; refreshSftpButton() }
+            .create()
+        dialog.setOnDismissListener { onSftpKeyPicked = null }
+        dialog.show()
+        dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+            try {
+                val server = address.text.toString().trim()
+                val target = SftpTarget.parse(server)
+                val key = SftpProfile.parseHostKey(hostKey.text.toString())
+                val secret = password.text.toString()
+                require(identity != null || secret.isNotEmpty()) { "Enter a password or choose an SSH key." }
+                batch.sftp = SftpProfile(target, server, key, secret, identity)
+                refreshSftpButton()
+                dialog.dismiss()
+            } catch (error: IllegalArgumentException) {
+                toast(error.message ?: "Invalid SFTP settings")
+            } catch (_: java.net.URISyntaxException) {
+                toast("Use sftp://user@host/folder")
+            }
+        }
+    }
+
+    private fun refreshSftpButton() {
+        findViewById<MaterialButton>(R.id.batchSftp).text = batch.sftp?.let {
+            "SFTP copy · ${it.target.host}"
+        } ?: "Configure SFTP copy"
+    }
     private fun refreshQueue() {
         queueView.text = if (queue.isEmpty()) "No files yet" else "${queue.size} file(s) · " + queue.take(3).joinToString(", ") { it.lastPathSegment ?: "" } + if (queue.size > 3) " +${queue.size - 3}" else ""
-        startBtn.text = if (batchRunning) "Working…" else actionLabel(); startBtn.isEnabled = queue.isNotEmpty() && !batchRunning
-        startBtn.visibility = if (queue.isEmpty()) View.GONE else View.VISIBLE
+        val canStop = batchRunning && batch.state.value?.canStop == true
+        startBtn.setText(if (batchRunning) R.string.batch_working else actionLabel())
+        startBtn.isEnabled = queue.isNotEmpty() && !batchRunning
+        startBtn.visibility = if (canStop) View.GONE else View.VISIBLE
+        stopBtn.visibility = if (canStop) View.VISIBLE else View.GONE
+        stopBtn.setText(if (batch.isStopping) R.string.batch_stopping else R.string.batch_stop_after_file)
+        stopBtn.isEnabled = !batch.isStopping
+        findViewById<View>(R.id.clearQueueBtn).isEnabled = queue.isNotEmpty()
     }
     private fun refreshOutputs() {
         val isPrivate = getSharedPreferences("manual", Context.MODE_PRIVATE).getBoolean("private_output", false)
@@ -653,18 +868,6 @@ class MainActivity : AppCompatActivity() {
             .setNegativeButton("Close", null).show()
     }
 
-    private fun refreshLiveProgress() {
-        if (batchRunning) return
-        val p = BatchSchedule.prefs(this)
-        val title = p.getString("live_title", null) ?: return
-        batchStatus.text = title
-        batchDetail.text = p.getString("live_detail", "")
-        batchDetail.visibility = View.VISIBLE
-        batchProgress.visibility = View.VISIBLE
-        batchProgress.max = p.getInt("live_total", 0).coerceAtLeast(1)
-        batchProgress.progress = p.getInt("live_current", 0)
-    }
-
     private fun refreshWatchProgress() {
         val p = getSharedPreferences("folder_watch", Context.MODE_PRIVATE)
         findViewById<TextView>(R.id.encryptLiveStatus).text = p.getString("encrypt_live", "")
@@ -672,13 +875,15 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
-        BatchSchedule.prefs(this).unregisterOnSharedPreferenceChangeListener(progressListener)
         getSharedPreferences("folder_watch", Context.MODE_PRIVATE).unregisterOnSharedPreferenceChangeListener(watchProgressListener)
         super.onDestroy()
     }
 
     private fun shareFile(file: File) {
         val uri = FileProvider.getUriForFile(this, "$packageName.provider", file)
+        shareImage(uri)
+    }
+    private fun shareImage(uri: Uri) {
         startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).apply {
             type = "image/png"; putExtra(Intent.EXTRA_STREAM, uri); addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }, "Export a copy"))
@@ -743,6 +948,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun checkForUpdates() {
         updateBtn.isEnabled = false
+        updateStatus.visibility = View.VISIBLE
         updateStatus.text = "Checking GitHub for updates…"
         Thread {
             try {
@@ -754,7 +960,10 @@ class MainActivity : AppCompatActivity() {
                     when {
                         release == null -> updateStatus.text = "No Android APK found in the latest release (installed v${result.currentVersion})."
                         !result.newer -> updateStatus.text = "Up to date — installed v${result.currentVersion}; latest release v${release.version}."
-                        else -> showUpdateDialog(release)
+                        else -> {
+                            updateStatus.text = getString(R.string.settings_update_available, release.version)
+                            if (settingsBack.isEnabled) showUpdateDialog(release)
+                        }
                     }
                 }
             } catch (error: Exception) {
@@ -847,98 +1056,98 @@ class MainActivity : AppCompatActivity() {
 
     private fun startBatch() {
         if (queue.isEmpty() || batchRunning) return
-        val pass = passInput.text.toString(); if (mode != "verify" && pass.isEmpty()) { toast("Enter a passphrase first"); return }
-        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-        val batchMode = mode
-        val iterations = iterSlider.value.toInt()
-        val privateOutput = getSharedPreferences("manual", Context.MODE_PRIVATE).getBoolean("private_output", false)
-        val outputUri = manualOutputUri
-        batchRunning = true
-        val batch = queue.toList(); queue.clear(); refreshQueue(); startBtn.isEnabled = false; startBtn.text = "Working…"
-        batchProgress.visibility = View.VISIBLE; batchProgress.max = batch.size; batchProgress.progress = 0
-        batchDetail.visibility = View.VISIBLE; batchStatus.text = "${actionLabel()} started — 0 of ${batch.size}"; FolderWatcher.log(this, "Batch ${mode} started: ${batch.size} file(s)")
+        val passphrase = passInput.text.toString()
+        if ((mode == "encrypt" || mode == "decrypt") && passphrase.isEmpty()) {
+            promptBatchField(passInput, R.id.batchPassLayout, R.string.batch_pass_required)
+            return
+        }
+        if (mode == "encrypt" && passphrase != confirmInput.text.toString()) {
+            promptBatchField(confirmInput, R.id.batchConfirmLayout, R.string.batch_pass_mismatch)
+            return
+        }
+        if (mode == "analyze" && queue.size > 2) {
+            toast("Add one or two images to analyze")
+            return
+        }
         ensureNotificationPermission()
-        BatchSchedule.progress(this, "Batch $batchMode", "Starting ${batch.size} files", 0, batch.size)
-        Thread {
-            var completed = 0; var succeeded = 0
-            for (uri in batch) {
-                var ok = false
-                val inputName = displayName(uri)
-                try {
-                    val index = completed + 1
-                    BatchSchedule.progress(this, "Batch $batchMode · $index/${batch.size}", "Processing $inputName", completed, batch.size)
-                    runOnUiThread { batchStatus.text = "${batchMode.replaceFirstChar { it.uppercase() }} — $index of ${batch.size}"; batchDetail.text = "Current: $inputName" }
-                    val image = loadImage(uri)
-                    if (batchMode == "verify") {
-                        showResult(inputName, verifyImage(image, pass.ifEmpty { null }).let { "[${it.status}] ${it.message}" }, null)
-                    } else {
-                        val result = if (batchMode == "encrypt") encryptImage(image, pass, iterations) else decryptImage(image, pass)
-                        val inputStem = inputName.substringBeforeLast('.')
-                        val stem = if (batchMode == "decrypt" && inputStem.endsWith("_encrypted")) inputStem.removeSuffix("_encrypted") else inputStem
-                        val name = if (batchMode == "encrypt") "${stem}_encrypted.png" else "$stem.png"
-                        val output = writeOutput(result, name, compress = batchMode == "decrypt", privateOutput = privateOutput, outputUri = outputUri); showBitmap(result); showResult(inputName, "→ ${output.name}", output)
-                    }
-                    succeeded++; ok = true
-                } catch (error: Exception) {
-                    showResult(inputName, "ERROR: ${error.message}", null)
-                } finally {
-                    completed++; runOnUiThread { batchProgress.progress = completed }
-                    BatchSchedule.progress(this, "Batch $batchMode", "$completed of ${batch.size} processed", completed, batch.size)
+        val privateOutput = getSharedPreferences("manual", Context.MODE_PRIVATE).getBoolean("private_output", false)
+        val files = queue.toList()
+        queue.clear()
+        batch.start(applicationContext, files, mode, passphrase, iterSlider.value.toInt(), privateOutput, manualOutputUri, batch.sftp)
+    }
+
+    private fun promptBatchField(field: TextInputEditText, container: Int, message: Int) {
+        findViewById<TextInputLayout>(container).error = getString(message)
+        field.requestFocus()
+        WindowCompat.getInsetsController(window, field).show(WindowInsetsCompat.Type.ime())
+    }
+
+    private fun renderBatch(state: BatchState) {
+        batchRunning = !state.done
+        refreshQueue()
+        if (batchRunning) window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        else window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        if (renderedBatchId != state.id) {
+            renderedBatchId = state.id
+            results.removeAllViews()
+            preview.setImageDrawable(null)
+            preview.visibility = View.GONE
+            renderAnalysis(null)
+        }
+        batchStatus.text = state.title
+        batchDetail.text = state.detail
+        findViewById<View>(R.id.batchFeedback).visibility = View.VISIBLE
+        batchProgress.visibility = if (batchRunning) View.VISIBLE else View.GONE
+        batchProgress.max = state.total.coerceAtLeast(1)
+        batchProgress.progress = state.completed
+        state.preview?.let {
+            preview.setImageBitmap(it)
+            preview.visibility = View.VISIBLE
+        }
+        if (state.analysis != shownAnalysis) renderAnalysis(state.analysis)
+        for (item in state.results.drop(results.childCount)) {
+            val row = TextView(this).apply {
+                text = "${item.input}: ${item.message}"
+                setPadding(0, 8, 0, 8)
+            }
+            if (item.output != null) row.setOnClickListener { shareImage(item.output.uri) }
+            results.addView(row)
+        }
+    }
+
+    private fun renderAnalysis(report: ImageAnalysis?) {
+        shownAnalysis = report
+        val container = findViewById<LinearLayout>(R.id.batchAnalysis)
+        container.removeAllViews()
+        container.visibility = if (report == null) View.GONE else View.VISIBLE
+        if (report == null) return
+        val labels = listOf("Red", "Green", "Blue", "Alpha").take(report.channels.size)
+        val summary = TextView(this)
+        val label = TextView(this).apply { text = "Histogram channel" }
+        val selector = Spinner(this).apply {
+            adapter = ArrayAdapter(context, android.R.layout.simple_spinner_dropdown_item, labels)
+            contentDescription = "Histogram channel"
+        }
+        val histogram = ImageHistogram(this)
+        val height = (140 * resources.displayMetrics.density).toInt()
+        container.addView(label)
+        container.addView(selector)
+        container.addView(histogram, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, height))
+        container.addView(summary)
+        selector.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onNothingSelected(parent: AdapterView<*>?) = Unit
+            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
+                val channel = report.channels[position]
+                histogram.setChannel(labels[position], position, channel.histogram)
+                val mean = report.channels.map { it.entropy }.average()
+                summary.text = buildString {
+                    append("Mean entropy %.4f bits/byte\n".format(mean))
+                    append("${labels[position]} entropy %.4f bits/byte\n".format(channel.entropy))
+                    append("Correlation H %.3f  V %.3f  D %.3f".format(*channel.correlation.toTypedArray()))
+                    if (report.npcr != null) append("\nNPCR %.2f%% · UACI %.2f%%".format(report.npcr, report.uaci))
                 }
-                FolderWatcher.log(this, "Batch $batchMode: $inputName ${if (ok) "completed" else "failed"}")
             }
-            runOnUiThread {
-                if (!isFinishing && !isDestroyed) window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-                batchRunning = false
-                refreshQueue(); batchStatus.text = "Batch complete — $succeeded of ${batch.size} succeeded"; batchDetail.text = "Last processed: ${batch.lastOrNull()?.lastPathSegment}"
-            }
-            FolderWatcher.log(this, "Batch $batchMode finished: $succeeded/${batch.size} succeeded")
-            BatchSchedule.progress(this, "Batch complete", "$succeeded of ${batch.size} succeeded", batch.size, batch.size, true)
-        }.start()
-    }
-    private fun loadImage(uri: Uri): ImageData = ImageInput.decode(this, uri)
-    private fun displayName(uri: Uri): String {
-        val fallback = uri.lastPathSegment?.substringAfterLast('/')?.takeIf { it.isNotBlank() } ?: "image"
-        if (uri.scheme == "raw" || uri.scheme == "file") {
-            return (uri.path ?: uri.schemeSpecificPart)?.substringAfterLast('/')?.takeIf { it.isNotBlank() } ?: fallback
         }
-        return try {
-            DocumentFile.fromSingleUri(this, uri)?.name ?: fallback
-        } catch (_: Exception) {
-            fallback
-        }
-    }
-    private fun writeOutput(image: ImageData, name: String, compress: Boolean = true, privateOutput: Boolean = false, outputUri: Uri? = null): File {
-        require(name == File(name).name && name != "." && name != "..") { "Invalid output filename" }
-        val png = encodePNG(image.pixels, image.width, image.height, image.channels, compress = compress)
-        if (!privateOutput && outputUri != null) {
-            val tree = DocumentFile.fromTreeUri(this, outputUri) ?: error("output folder unavailable")
-            var finalName = name; var n = 2
-            while (tree.findFile(finalName) != null) finalName = name.substringBeforeLast('.') + "_${n++}.png"
-            val doc = tree.createFile("image/png", finalName) ?: error("cannot create output")
-            contentResolver.openOutputStream(doc.uri)?.use { it.write(png) } ?: error("cannot write output")
-            val cacheName = (doc.name ?: finalName).replace(Regex("[^A-Za-z0-9._-]"), "_")
-            return File(cacheDir, cacheName).also { it.writeBytes(png) }
-        }
-        val dir = if (privateOutput) File(filesDir, "private_outputs") else File(getExternalFilesDir(null), "OptiCipher")
-        check(dir.exists() || dir.mkdirs()) { "Cannot create output folder" }
-        var out = File(dir, name); var n = 2
-        while (out.exists()) out = File(dir, name.substringBeforeLast('.') + "_${n++}.png"); out.writeBytes(png); return out
-    }
-    private fun showBitmap(image: ImageData) = runOnUiThread {
-        if (isFinishing || isDestroyed) return@runOnUiThread
-        val old = preview.drawable
-        preview.setImageDrawable(null)
-        (old as? BitmapDrawable)?.bitmap?.takeIf { !it.isRecycled }?.recycle()
-        val bitmap = Bitmap.createBitmap(image.width, image.height, Bitmap.Config.ARGB_8888); val argb = IntArray(image.width * image.height)
-        for (n in argb.indices) { val p = n * image.channels; argb[n] = ((if (image.channels == 4) image.pixels[p + 3].toInt() and 255 else 255) shl 24) or ((image.pixels[p].toInt() and 255) shl 16) or ((image.pixels[p + 1].toInt() and 255) shl 8) or (image.pixels[p + 2].toInt() and 255) }
-        bitmap.setPixels(argb, 0, image.width, 0, 0, image.width, image.height); preview.setImageBitmap(bitmap); preview.visibility = View.VISIBLE
-    }
-    private fun showResult(name: String, message: String, file: File?) = runOnUiThread {
-        if (isFinishing || isDestroyed) return@runOnUiThread
-        val view = TextView(this).apply { text = "$name: $message"; setPadding(0, 8, 0, 8) }
-        if (file != null) view.setOnClickListener { shareFile(file) }
-        results.addView(view)
     }
     private fun toast(message: String) = Toast.makeText(this, message, Toast.LENGTH_LONG).show()
 }

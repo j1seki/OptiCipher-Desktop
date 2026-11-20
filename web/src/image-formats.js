@@ -48,8 +48,8 @@ async function decodeNative(file) {
 async function decodeHeif(file, isAvif) {
   if (!simdSupported()) return decodeNative(file);
   const codec = isAvif ? avif : heic;
-  const ready = isAvif ? (avifReady ??= codec.loadDecoder(avifWasmUrl))
-    : (heicReady ??= codec.loadDecoder(heicWasmUrl));
+  const ready = isAvif ? (avifReady ??= codec.loadDecoder(new URL(avifWasmUrl, import.meta.url).href))
+    : (heicReady ??= codec.loadDecoder(new URL(heicWasmUrl, import.meta.url).href));
   await ready;
   const decoded = codec.decode(new Uint8Array(await file.arrayBuffer()));
   let pixels;
@@ -68,7 +68,8 @@ async function decodeHeif(file, isAvif) {
 }
 
 async function decodeRaw(file) {
-  rawReady ??= initFlashRaw({ wasm: fetch(simdSupported() ? flashRawWasmUrl : flashRawFallbackWasmUrl), threads: false });
+  const wasmUrl = new URL(simdSupported() ? flashRawWasmUrl : flashRawFallbackWasmUrl, import.meta.url);
+  rawReady ??= initFlashRaw({ wasm: fetch(wasmUrl), threads: false });
   await rawReady;
   const raw = await FlashRaw.open(file);
   try {

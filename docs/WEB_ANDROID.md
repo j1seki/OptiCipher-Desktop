@@ -12,7 +12,7 @@ server, and nothing is uploaded — files are processed in the browser tab.
 
 ```bash
 cd web
-npm install
+npm ci
 npm test        # parity: PCG64 vs NumPy, ChaCha20 RFC vector, round-trip, PNG
 npm run build   # -> web/dist (deploy this folder)
 ```
@@ -48,7 +48,7 @@ cd android
 ./gradlew assembleDebug       # -> app/build/outputs/apk/debug/*.apk
 ```
 
-`.github/workflows/android.yml` runs the tests and uploads the debug APK.
+`.github/workflows/android.yml` runs unit tests and lint and uploads the APK.
 
 ### Folder watching — what Android allows
 
@@ -60,13 +60,14 @@ uses the supported path:
    reboot, no broad storage permission needed — this is why `MANAGE_EXTERNAL_STORAGE`
    / all-files access is deliberately avoided: Play policy would reject it).
 2. A foreground watcher service checks at the selected interval (15 minutes,
-   1, 6 or 12 hours, or daily). WorkManager provides a periodic fallback.
-   Android may delay checks; **Run now** queues a check while the watch is on.
+   1, 6 or 12 hours, or daily). WorkManager provides a periodic fallback and
+   schedules weekly watches using local time. Android may delay checks.
+   **Run now** queues a check while the watch is on.
 3. Each new PNG is checked for an existing **`OPTC` header** (by content, not
    filename) so already-encrypted files are not re-encrypted.
-4. Outputs go to the chosen *output tree* (or app storage); the watch conflict
-   setting chooses whether to skip or overwrite an existing name. Originals are
-   copied by default; "move originals" is an opt-in toggle.
+4. Outputs go to the chosen *output tree* or app storage. The watch conflict
+   setting chooses whether to skip or overwrite an existing name. Overwriting
+   in a selected tree requires a provider that supports renaming.
 
 **Passphrase:** needed to process anything. Batch work can use an in-memory
 passphrase, but background watching requires **"Remember passphrase"**, which

@@ -91,6 +91,15 @@ def test_bit_flip_first_middle_last_of_payload(encrypted):
             decrypt_image(bad, PASS)
 
 
+def test_encrypt_rejects_kdf_cost_that_readers_cannot_open(monkeypatch):
+    def unexpected_key_derivation(*args):
+        pytest.fail("an invalid iteration count reached PBKDF2")
+
+    monkeypatch.setattr(keys, "derive_keys", unexpected_key_derivation)
+    with pytest.raises(ValueError, match="iterations must be"):
+        encrypt_image(np.zeros((1, 1, 3), dtype=np.uint8), PASS, keys.MAX_UNVERIFIED_ITERATIONS + 1)
+
+
 def test_hmac_tag_corruption_rejected(encrypted):
     _, enc = encrypted
     for delta in (0, 15, 31):  # first, middle, last byte of the 32-byte tag

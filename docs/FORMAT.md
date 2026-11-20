@@ -110,7 +110,7 @@ when the reader starts work. To prevent a crafted file from forcing
 unbounded cost, the reader MUST reject, *before* key derivation and before
 any other expensive step, any header where:
 
-* `iterations > 10_000_000` (5× the 2 000 000 GUI/CLI ceiling; a crafted
+* `iterations > 10_000_000` (5× the 2 000 000 GUI ceiling; a crafted
   uint32-max value would otherwise burn ~hours of CPU in PBKDF2 before the
   HMAC check could fail), or `iterations < 1`;
 * `channels ∉ {3, 4}`, `height < 1`, `width < 1`;

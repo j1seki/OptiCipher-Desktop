@@ -31,7 +31,7 @@ jobs:
       - name: Install + test + build web app
         working-directory: web
         run: |
-          npm install
+          npm ci
           npm test
           npm run build
       - uses: actions/configure-pages@v5

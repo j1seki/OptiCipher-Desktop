@@ -60,20 +60,17 @@
 
             <include layout="@layout/page_activity" />
         </androidx.core.widget.NestedScrollView>
-    </FrameLayout>
 
-    <com.google.android.material.floatingactionbutton.ExtendedFloatingActionButton
-        android:id="@+id/startBtn"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_gravity="bottom|end"
-        android:layout_marginEnd="16dp"
-        android:layout_marginBottom="96dp"
-        android:text="Encrypt files"
-        android:textColor="@color/brand_on_accent"
-        app:backgroundTint="@color/brand_accent"
-        app:icon="@drawable/ic_play"
-        app:iconTint="@color/brand_on_accent" />
+        <androidx.core.widget.NestedScrollView
+            android:id="@+id/settingsPage"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:fillViewport="true"
+            android:visibility="gone">
+
+            <include layout="@layout/page_settings" />
+        </androidx.core.widget.NestedScrollView>
+    </FrameLayout>
 
     <com.google.android.material.bottomnavigation.BottomNavigationView
         android:id="@+id/bottomNav"

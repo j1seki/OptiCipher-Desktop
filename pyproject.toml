@@ -14,7 +14,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "opticipher"
-version = "1.4.2"
+version = "1.4.4"
 description = "Open-source optical (perceptual) image encryption for research and education."
 readme = "README.md"
 requires-python = ">=3.9"
@@ -56,6 +56,7 @@ gpu = [
 ]
 app = [
     "PySide6>=6.6",
+    "keyring>=24",  # Remember folder-watch passphrases in the system credential store
     "wgpu>=0.25",
     "paramiko>=3.0",  # sftp:// output locations (app/sftp.py)
     "pillow-heif>=0.16",  # HEIC / HEIF decoding

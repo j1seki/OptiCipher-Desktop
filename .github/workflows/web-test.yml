@@ -1,7 +1,7 @@
 name: web
 on:
   push:
-    branches: [feat/google-photos-desktop-formats]
+    branches: [main]
   pull_request:
   workflow_dispatch:
 
@@ -15,7 +15,7 @@ jobs:
           node-version: '22'
       - name: Install dependencies
         working-directory: web
-        run: npm install
+        run: npm ci
       - name: Run web tests
         working-directory: web
         run: npm test

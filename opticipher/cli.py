@@ -30,7 +30,7 @@ import sys
 from . import __version__, metrics
 from .core import DecryptionError, decrypt_image, encrypt_image
 from .io_image import load_image, save_image
-from .keys import DEFAULT_ITERATIONS
+from .keys import DEFAULT_ITERATIONS, MAX_UNVERIFIED_ITERATIONS
 
 
 def _get_passphrase(arg_value: str | None, confirm: bool) -> str:
@@ -95,14 +95,14 @@ def _cmd_metrics(args: argparse.Namespace) -> int:
 
 
 def _iterations_arg(value: str) -> int:
-    """argparse type: PBKDF2 iterations must fit the header's uint32 field."""
+    """Accept PBKDF2 costs supported by v1 readers."""
     try:
         parsed = int(value, 10)
     except ValueError:
         raise argparse.ArgumentTypeError(f"not an integer: {value!r}") from None
-    if not (0 < parsed <= 0xFFFFFFFF):
+    if not (0 < parsed <= MAX_UNVERIFIED_ITERATIONS):
         raise argparse.ArgumentTypeError(
-            f"iterations must be in 1..{0xFFFFFFFF}, got {parsed}"
+            f"iterations must be in 1..{MAX_UNVERIFIED_ITERATIONS}, got {parsed}"
         )
     return parsed
 
@@ -132,7 +132,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--iterations",
         type=_iterations_arg,
         default=DEFAULT_ITERATIONS,
-        help=f"PBKDF2 iterations, 1..{0xFFFFFFFF} (default {DEFAULT_ITERATIONS})",
+        help=f"PBKDF2 iterations, 1..{MAX_UNVERIFIED_ITERATIONS} (default {DEFAULT_ITERATIONS})",
     )
     p_enc.set_defaults(func=_cmd_encrypt)
 
@@ -155,7 +155,11 @@ def main(argv: list[str] | None = None) -> int:
     """Entry point. Returns a process exit code."""
     parser = build_parser()
     args = parser.parse_args(argv)
-    return args.func(args)
+    try:
+        return args.func(args)
+    except (OSError, ValueError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
 
 
 if __name__ == "__main__":

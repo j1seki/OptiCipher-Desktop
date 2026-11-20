@@ -348,7 +348,7 @@ def _entropy_from_counts(counts: np.ndarray) -> float:
 # ---------------------------------------------------------------------------
 class VerifyWorker(QThread):
     """
-    Check one file's format and (with a passphrase) its integrity.
+    Check file format and, with a passphrase, integrity for one file or a batch.
 
     Read-only: it never writes anything and never reconstructs the plaintext.
     The payload is a plain dict so the page can render it without knowing
@@ -375,27 +375,31 @@ class VerifyWorker(QThread):
     failed = Signal(str)
 
     def __init__(
-        self, path: str, passphrase: str | None = None, parent=None
+        self, path: str | List[str], passphrase: str | None = None, parent=None
     ) -> None:
         super().__init__(parent)
-        self.path = path
+        self.path = path if isinstance(path, str) else None
+        self.paths = [path] if isinstance(path, str) else list(path)
         self.passphrase = passphrase
 
     def run(self) -> None:  # executes in the worker thread
-        try:
-            pixels = load_image(self.path)
-            outcome = verify_image(pixels, self.passphrase)
-            payload = outcome.as_dict()
-            payload["path"] = self.path
+        for path in self.paths:
             try:
-                payload["size"] = os.path.getsize(self.path)
-            except OSError:
-                payload["size"] = 0
-            payload["sha256"] = _file_sha256(self.path)
+                pixels = load_image(path)
+                payload = verify_image(pixels, self.passphrase).as_dict()
+                try:
+                    payload["size"] = os.path.getsize(path)
+                except OSError:
+                    payload["size"] = 0
+                payload["sha256"] = _file_sha256(path)
+            except Exception as exc:
+                if self.path is not None:
+                    self.failed.emit(str(exc))
+                    continue
+                payload = {"status": "read_error", "ok": False, "message": f"Could not read {os.path.basename(path)}. {exc}"}
+            payload["path"] = path
             self.result.emit(payload)
-        except Exception as exc:  # noqa: BLE001 - surface to the UI
-            traceback.print_exc()
-            self.failed.emit(str(exc))
+        self.passphrase = None
 
 
 def _file_sha256(path: str) -> str:

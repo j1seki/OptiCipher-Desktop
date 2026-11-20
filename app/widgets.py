@@ -32,11 +32,15 @@ Contents
 from __future__ import annotations
 
 import os
+import secrets
+import string
 from typing import Iterable, List, Optional
 
 from PySide6.QtCore import QSize, Qt, Signal
 from PySide6.QtGui import QColor, QIcon, QImage, QPainter, QPixmap
 from PySide6.QtWidgets import (
+    QDialog,
+    QDialogButtonBox,
     QFileDialog,
     QFrame,
     QHBoxLayout,
@@ -363,6 +367,27 @@ class PasswordField(QWidget):
 
     def setText(self, value: str) -> None:  # noqa: N802 (Qt-ish naming)
         self.edit.setText(value)
+
+    def generate(self, confirmation=None) -> None:
+        alphabet = string.ascii_letters + string.digits + "!@#%+-_"
+        value = "".join(secrets.choice(alphabet) for _ in range(28))
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Generated passphrase")
+        layout = QVBoxLayout(dialog)
+        layout.addWidget(QLabel("Save this passphrase to decrypt your files later."))
+        display = QLineEdit(value)
+        display.setReadOnly(True)
+        display.selectAll()
+        layout.addWidget(display)
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons.button(QDialogButtonBox.Ok).setText("Use passphrase")
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+        layout.addWidget(buttons)
+        if dialog.exec() == QDialog.Accepted:
+            self.setText(value)
+            if confirmation is not None:
+                confirmation.setText(value)
 
     def set_tool_tip(self, text: str) -> None:
         self.edit.setToolTip(text)

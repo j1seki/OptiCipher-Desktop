@@ -37,6 +37,7 @@ from dataclasses import dataclass
 from pathlib import PurePosixPath
 from typing import Callable, Optional
 from urllib.parse import urlsplit
+from uuid import uuid4
 
 SCHEME = "sftp://"
 DEFAULT_PORT = 22
@@ -96,7 +97,7 @@ def parse_sftp_url(url: str) -> SftpTarget:
     if not host:
         raise ValueError("The sftp:// location is missing a host name.")
     try:
-        port = parts.port or DEFAULT_PORT
+        port = parts.port if parts.port is not None else DEFAULT_PORT
     except ValueError:
         raise ValueError(
             f"Invalid port in {raw!r} — use sftp://user@host:port/path."
@@ -125,7 +126,9 @@ def _default_client():
             "SFTP support needs the 'paramiko' package. Install it with "
             "'pip install paramiko' — official OptiCipher releases bundle it."
         ) from exc
-    return paramiko.SSHClient()
+    client = paramiko.SSHClient()
+    client.load_system_host_keys()
+    return client
 
 
 class SftpUploader:
@@ -199,7 +202,7 @@ class SftpUploader:
         Upload `local_path` into the target directory and return the remote
         path it now occupies.
 
-        Safety: writes to `<name>.part` first, verifies the remote size
+        Safety: writes to a uniquely named `.part` first, verifies the remote size
         matches the local file, then renames into place. A failed or
         interrupted transfer therefore never occupies the real filename and
         never leaves a *believable* partial file.
@@ -208,7 +211,7 @@ class SftpUploader:
         local_size = os.path.getsize(local_path)
         filename = os.path.basename(local_path)
         remote = self.target.remote_file(filename)
-        part = remote + ".part"
+        part = self.target.remote_file(f".opticipher-{uuid4().hex}.part")
 
         client = self._connect_client()
         try:
@@ -230,15 +233,11 @@ class SftpUploader:
                     f"upload verification failed for {filename}: remote has "
                     f"{remote_size} bytes, local file has {local_size}"
                 )
-            # Publish: atomic-ish rename. posix_rename overwrites any previous
-            # remote copy; the plain fallback removes the old one first.
+            # POSIX rename can replace a previous copy atomically. Standard
+            # SFTP rename is safe for publishing to an unoccupied name.
             try:
                 sftp.posix_rename(part, remote)
-            except (OSError, IOError, AttributeError):
-                try:
-                    sftp.remove(remote)
-                except OSError:
-                    pass
+            except (OSError, AttributeError):
                 sftp.rename(part, remote)
         except SftpError:
             self._discard_part(sftp, part)

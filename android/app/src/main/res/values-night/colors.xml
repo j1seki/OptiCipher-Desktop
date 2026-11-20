@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Brand tokens from the desktop design system (app/theme.py) -->
+    <color name="ic_launcher_background">#101318</color>
+    <color name="brand_accent">#73E8C2</color>
+    <color name="brand_accent_dark">#2BB88C</color>
+    <color name="brand_container">#1C3A31</color>
+    <color name="brand_bg">#0D1218</color>
+    <color name="brand_surface">#18212B</color>
+    <color name="brand_on_accent">#062018</color>
+    <color name="brand_on_surface">#E6EDF3</color>
+    <color name="brand_muted">#ACBAC7</color>
+    <color name="brand_outline">#344350</color>
+    <color name="brand_error">#FF6B6B</color>
+    <color name="brand_success">#38D6A3</color>
+</resources>

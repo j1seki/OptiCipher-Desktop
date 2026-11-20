@@ -38,4 +38,24 @@ class CryptoTest {
         assertTrue(px.contentEquals(back.pixels))
         assertEquals(4, back.channels)
     }
+
+    @Test fun rejectsPngWithoutItsEndChunk() {
+        val png = encodePNG(ByteArray(12), 2, 2, 3)
+        assertThrows(IllegalArgumentException::class.java) { decodePNG(png.copyOf(png.size - 12)) }
+    }
+
+    @Test fun rejectsPngWhoseDimensionsExceedItsCompressedPixels() {
+        val png = encodePNG(ByteArray(12), 2, 2, 3)
+        png[23] = 3 // IHDR height
+        val crc = java.util.zip.CRC32().apply { update(png, 12, 17) }.value
+        java.nio.ByteBuffer.wrap(png).putInt(29, crc.toInt())
+        val error = assertThrows(IllegalArgumentException::class.java) { decodePNG(png) }
+        assertTrue(error.message.orEmpty().contains("dimensions"))
+    }
+
+    @Test fun rejectsKdfCostIncompatibleWithReaders() {
+        val img = ImageData(ByteArray(3), 1, 1, 3)
+        assertThrows(IllegalArgumentException::class.java) { encryptImage(img, "test", MAX_UNVERIFIED_ITERATIONS + 1) }
+        assertThrows(DecryptionError::class.java) { decryptImage(img, "test") }
+    }
 }

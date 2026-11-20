@@ -51,12 +51,14 @@ from __future__ import annotations
 import os
 import tempfile
 from pathlib import Path
+from threading import Lock
 from typing import Union
 
 import numpy as np
 from PIL import Image, ImageOps
 
 PathLike = Union[str, Path]
+_publish_lock = Lock()
 
 
 def load_image(path: PathLike) -> np.ndarray:
@@ -155,7 +157,9 @@ def _apply_umask(path: Path) -> None:
         pass
 
 
-def save_image(pixels: np.ndarray, path: PathLike, *, overwrite: bool = False) -> Path:
+def save_image(
+    pixels: np.ndarray, path: PathLike, *, overwrite: bool = False, keep_both: bool = True
+) -> Path:
     """
     Save a uint8 (H, W, C) array as a LOSSLESS PNG, atomically.
 
@@ -170,6 +174,9 @@ def save_image(pixels: np.ndarray, path: PathLike, *, overwrite: bool = False) -
         When False (the default) an existing destination is *never* replaced —
         a unique name is chosen instead. When True the caller explicitly
         authorises atomic replacement.
+    keep_both:
+        When False, raise FileExistsError for an occupied destination unless
+        overwrite is enabled.
 
     Returns
     -------
@@ -195,9 +202,6 @@ def save_image(pixels: np.ndarray, path: PathLike, *, overwrite: bool = False) -
     if path.suffix.lower() != ".png":
         # Guard the user against accidentally choosing a lossy container.
         path = path.with_suffix(".png")
-    if not overwrite:
-        path = _unique_path(path)
-
     mode = "RGBA" if pixels.shape[2] == 4 else "RGB"
     img = Image.fromarray(pixels, mode=mode)
 
@@ -214,8 +218,14 @@ def save_image(pixels: np.ndarray, path: PathLike, *, overwrite: bool = False) -
             img.save(fh, format="PNG")
             fh.flush()
             os.fsync(fh.fileno())
-        _apply_umask(tmp)
-        os.replace(tmp, path)
+        with _publish_lock:
+            _apply_umask(tmp)
+            if not overwrite:
+                if keep_both:
+                    path = _unique_path(path)
+                elif path.exists():
+                    raise FileExistsError(path)
+            os.replace(tmp, path)
     except BaseException:
         tmp.unlink(missing_ok=True)
         raise

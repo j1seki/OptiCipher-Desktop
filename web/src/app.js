@@ -5,130 +5,164 @@ import { loadImage } from './image-formats.js';
 const $ = id => document.getElementById(id);
 const yieldToUI = () => new Promise(r => setTimeout(r, 0));
 
-document.querySelectorAll('.tabs button').forEach(b => b.addEventListener('click', () => {
-  document.querySelectorAll('.tabs button').forEach(x => x.classList.remove('active'));
-  b.classList.add('active');
+const tabs = document.querySelectorAll('.tabs button');
+tabs.forEach(b => b.addEventListener('click', () => {
+  tabs.forEach(x => x.setAttribute('aria-pressed', String(x === b)));
   document.querySelectorAll('.panel').forEach(p => p.classList.add('hidden'));
   $('tab-' + b.dataset.tab).classList.remove('hidden');
 }));
 
-function wireDrop(dropId, inputId) {
+function wireDrop(dropId, inputId, maxFiles = Infinity) {
   const drop = $(dropId), input = $(inputId);
-  input.addEventListener('change', () => input._files = [...input.files]);
+  const selection = document.createElement('span');
+  selection.className = 'selection';
+  selection.setAttribute('aria-live', 'polite');
+  selection.textContent = 'No images selected';
+  drop.append(selection);
+  let files = [];
+  let tooMany = false;
+  const select = source => {
+    files = [...source];
+    tooMany = files.length > maxFiles;
+    selection.textContent = tooMany ? `Choose up to ${maxFiles} images.`
+      : files.map(file => file.name).join(', ') || 'No images selected';
+  };
+  input.addEventListener('change', () => {
+    select(input.files);
+    input.value = '';
+  });
   drop.addEventListener('dragover', e => { e.preventDefault(); drop.classList.add('over'); });
   drop.addEventListener('dragleave', () => drop.classList.remove('over'));
-  drop.addEventListener('drop', e => { e.preventDefault(); drop.classList.remove('over'); input._files = [...e.dataTransfer.files]; });
-  return () => input._files || [];
+  drop.addEventListener('drop', e => {
+    e.preventDefault();
+    drop.classList.remove('over');
+    select(e.dataTransfer.files);
+  });
+  return () => {
+    if (tooMany) throw new Error(`Choose up to ${maxFiles} images.`);
+    if (!files.length) throw new Error('Add at least one image.');
+    return files;
+  };
 }
 const getEncryptFiles = wireDrop('drop-encrypt', 'files-encrypt');
 const getDecryptFiles = wireDrop('drop-decrypt', 'files-decrypt');
 const getVerifyFiles = wireDrop('drop-verify', 'files-verify');
-const getAnalyzeFiles = wireDrop('drop-analyze', 'files-analyze');
+const getAnalyzeFiles = wireDrop('drop-analyze', 'files-analyze', 2);
 
-function download(name, pngBytes) {
-  const url = URL.createObjectURL(new Blob([pngBytes], { type: 'image/png' }));
-  const a = document.createElement('a'); a.href = url; a.download = name; a.textContent = '⬇ ' + name; return a;
-}
-function preview(data, width, height, channels) {
-  const png = encodePNG(data, width, height, channels);
+function addOutput(out, inputName, name, { data, width, height, channels }) {
+  const url = URL.createObjectURL(new Blob([encodePNG(data, width, height, channels)], { type: 'image/png' }));
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = name;
+  link.textContent = name;
   const img = document.createElement('img');
-  img.src = URL.createObjectURL(new Blob([png], { type: 'image/png' }));
-  return img;
+  img.src = url;
+  img.alt = `Preview of ${name}`;
+  const item = addMessage(out, `${inputName} → `);
+  item.append(link, img);
 }
-function stem(name) { return name.replace(/\.[^.]+$/, ''); }
-function setBusy(btn, busy, label) { btn.disabled = busy; btn.textContent = busy ? 'Working…' : label; }
+function addMessage(out, message, variant = '') {
+  const item = document.createElement('div');
+  item.className = `item ${variant}`;
+  item.textContent = message;
+  out.append(item);
+  return item;
+}
 
+function wireRun(mode, run) {
+  const button = $('run-' + mode);
+  const out = $('out-' + mode);
+  const label = button.textContent;
+  button.addEventListener('click', async () => {
+    button.disabled = true;
+    button.textContent = 'Working…';
+    for (const link of out.querySelectorAll('a[download]')) URL.revokeObjectURL(link.href);
+    out.replaceChildren();
+    try {
+      await run(out);
+    } catch (error) {
+      addMessage(out, error.message, 'err');
+    } finally {
+      button.disabled = false;
+      button.textContent = label;
+    }
+  });
+}
+
+async function processFiles(out, files, process) {
+  for (const file of files) {
+    try {
+      await yieldToUI();
+      await process(await loadImage(file));
+    } catch (error) {
+      addMessage(out, `${file.name}: ${error.message}`, 'err');
+    }
+  }
+}
+
+function stem(name) { return name.replace(/\.[^.]+$/, ''); }
 $('iter-encrypt').addEventListener('input', e => $('iter-out').textContent = e.target.value);
 
-$('run-encrypt').addEventListener('click', async () => {
-  const btn = $('run-encrypt'); setBusy(btn, true, 'Encrypt');
-  const out = $('out-encrypt'); out.innerHTML = '';
-  try {
-    const pass = $('pass-encrypt').value;
-    if (!pass || pass !== $('pass2-encrypt').value) throw new Error('Passphrases do not match or are empty.');
-    const iter = Number($('iter-encrypt').value);
-    for (const f of getEncryptFiles()) {
-      try {
-        await yieldToUI();
-        const img = await loadImage(f);
-        const enc = await encryptImage(img.pixels, img.width, img.height, img.channels, pass, iter);
-        const png = encodePNG(enc.data, enc.width, enc.height, enc.channels);
-        const item = document.createElement('div'); item.className = 'item';
-        item.append(document.createTextNode(`${f.name} → `), download(stem(f.name) + '_encrypted.png', png), preview(enc.data, enc.width, enc.height, enc.channels));
-        out.append(item);
-      } catch (e) { const d = document.createElement('div'); d.className = 'item err'; d.textContent = `${f.name}: ${e.message}`; out.append(d); }
-    }
-  } catch (e) { out.innerHTML = `<div class="item err">${e.message}</div>`; }
-  setBusy(btn, false, 'Encrypt');
+wireRun('encrypt', async out => {
+  const files = getEncryptFiles();
+  const pass = $('pass-encrypt').value;
+  if (!pass || pass !== $('pass2-encrypt').value) throw new Error('Enter matching passphrases.');
+  const iter = Number($('iter-encrypt').value);
+  await processFiles(out, files, async ({ pixels, width, height, channels, name }) => {
+    const result = await encryptImage(pixels, width, height, channels, pass, iter);
+    addOutput(out, name, stem(name) + '_encrypted.png', result);
+  });
 });
 
-$('run-decrypt').addEventListener('click', async () => {
-  const btn = $('run-decrypt'); setBusy(btn, true, 'Decrypt');
-  const out = $('out-decrypt'); out.innerHTML = '';
-  try {
-    const pass = $('pass-decrypt').value;
-    for (const f of getDecryptFiles()) {
-      try {
-        await yieldToUI();
-        const img = await loadImage(f);
-        const dec = await decryptImage(img.pixels, img.width, img.height, img.channels, pass);
-        const png = encodePNG(dec.data, dec.width, dec.height, dec.channels);
-        const item = document.createElement('div'); item.className = 'item';
-        item.append(document.createTextNode(`${f.name} → `), download(stem(f.name) + '_decrypted.png', png), preview(dec.data, dec.width, dec.height, dec.channels));
-        out.append(item);
-      } catch (e) { const d = document.createElement('div'); d.className = 'item err'; d.textContent = `${f.name}: ${e.message}`; out.append(d); }
-    }
-  } catch (e) { out.innerHTML = `<div class="item err">${e.message}</div>`; }
-  setBusy(btn, false, 'Decrypt');
+wireRun('decrypt', async out => {
+  const files = getDecryptFiles();
+  const pass = $('pass-decrypt').value;
+  if (!pass) throw new Error('Enter a passphrase.');
+  await processFiles(out, files, async ({ pixels, width, height, channels, name }) => {
+    const result = await decryptImage(pixels, width, height, channels, pass);
+    addOutput(out, name, stem(name).replace(/_encrypted$/, '') + '_decrypted.png', result);
+  });
 });
 
-$('run-verify').addEventListener('click', async () => {
-  const btn = $('run-verify'); setBusy(btn, true, 'Verify integrity');
-  const out = $('out-verify'); out.innerHTML = '';
-  try {
-    const pass = $('pass-verify').value || null;
-    for (const f of getVerifyFiles()) {
-      try {
-        const img = await loadImage(f);
-        const v = await verifyImage(img.pixels, img.width, img.height, img.channels, pass);
-        const d = document.createElement('div'); d.className = 'item ' + (v.status === 'verified' ? 'ok' : '');
-        d.textContent = `${f.name}: [${v.status}] ${v.message}` + (v.iterations ? ` (v${v.version}, ${v.width}×${v.height}, ${v.channels}ch, strip ${v.stripRows}, ${v.iterations} iters)` : '');
-        out.append(d);
-      } catch (e) { const d = document.createElement('div'); d.className = 'item err'; d.textContent = `${f.name}: ${e.message}`; out.append(d); }
-    }
-  } catch (e) { out.innerHTML = `<div class="item err">${e.message}</div>`; }
-  setBusy(btn, false, 'Verify integrity');
+wireRun('verify', async out => {
+  const pass = $('pass-verify').value || null;
+  await processFiles(out, getVerifyFiles(), async ({ pixels, width, height, channels, name }) => {
+    const v = await verifyImage(pixels, width, height, channels, pass);
+    const info = v.iterations ? ` (v${v.version}, ${v.width}×${v.height}, ${v.channels}ch, strip ${v.stripRows}, ${v.iterations} iters)` : '';
+    const variant = v.authenticated ? 'ok' : v.status === 'unauthenticated' ? '' : 'err';
+    addMessage(out, `${name}: [${v.status}] ${v.message}${info}`, variant);
+  });
 });
 
-$('run-analyze').addEventListener('click', async () => {
-  const btn = $('run-analyze'); setBusy(btn, true, 'Run analysis');
-  const out = $('out-analyze'); out.innerHTML = '';
-  try {
-    const imgs = [];
-    for (const f of getAnalyzeFiles()) imgs.push(await loadImage(f));
-    if (!imgs.length) throw new Error('Add at least one image.');
-    const a = imgs[0];
-    const ent = entropyReport(a.pixels, a.width, a.height, a.channels);
-    const d = document.createElement('div'); d.className = 'item';
-    let txt = `${a.name}: entropy mean ${ent.mean.toFixed(4)} bits/byte`;
-    for (let c = 0; c < a.channels; c++) {
-      const corr = adjacentCorrelation(a.pixels, a.width, a.height, a.channels, c);
-      txt += ` · ch${c} corr H ${corr.horizontal.toFixed(3)} V ${corr.vertical.toFixed(3)} D ${corr.diagonal.toFixed(3)}`;
+wireRun('analyze', async out => {
+  const canvas = $('hist');
+  const ctx = canvas.getContext('2d');
+  canvas.hidden = true;
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  const files = getAnalyzeFiles();
+  const a = await loadImage(files[0]);
+  const ent = entropyReport(a.pixels, a.width, a.height, a.channels);
+  let txt = `${a.name}: entropy mean ${ent.mean.toFixed(4)} bits/byte`;
+  for (let c = 0; c < a.channels; c++) {
+    const corr = adjacentCorrelation(a.pixels, a.width, a.height, a.channels, c);
+    txt += ` · ch${c} corr H ${corr.horizontal.toFixed(3)} V ${corr.vertical.toFixed(3)} D ${corr.diagonal.toFixed(3)}`;
+  }
+  addMessage(out, txt);
+  // Histogram of channel 0
+  const h = histogram(a.pixels, a.width, a.height, a.channels, 0);
+  const max = Math.max(...h);
+  ctx.fillStyle = '#4da3ff';
+  const barWidth = canvas.width / h.length;
+  h.forEach((value, i) => {
+    const barHeight = value / max * (canvas.height - 10);
+    ctx.fillRect(i * barWidth, canvas.height - barHeight, barWidth, barHeight);
+  });
+  canvas.hidden = false;
+  if (files.length === 2) {
+    const b = await loadImage(files[1]);
+    if (a.width !== b.width || a.height !== b.height || a.channels !== b.channels) {
+      throw new Error('NPCR and UACI require matching dimensions and channel counts.');
     }
-    d.textContent = txt; out.append(d);
-    if (imgs.length >= 2) {
-      const b = imgs[1];
-      if (a.width !== b.width || a.height !== b.height || a.channels !== b.channels) throw new Error('NPCR/UACI needs two images of identical size.');
-      const d2 = document.createElement('div'); d2.className = 'item';
-      d2.textContent = `NPCR ${npcr(a.pixels, b.pixels).toFixed(2)}% · UACI ${uaci(a.pixels, b.pixels).toFixed(2)}%`;
-      out.append(d2);
-    }
-    // Histogram of channel 0
-    const h = histogram(a.pixels, a.width, a.height, a.channels, 0);
-    const cv = $('hist'), ctx = cv.getContext('2d'); ctx.clearRect(0, 0, cv.width, cv.height);
-    const max = Math.max(...h);
-    ctx.fillStyle = '#4da3ff';
-    for (let i = 0; i < 256; i++) { const bh = (h[i] / max) * (cv.height - 10); ctx.fillRect(i * (cv.width / 256), cv.height - bh, cv.width / 256, bh); }
-  } catch (e) { out.innerHTML = `<div class="item err">${e.message}</div>`; }
-  setBusy(btn, false, 'Run analysis');
+    addMessage(out, `NPCR ${npcr(a.pixels, b.pixels).toFixed(2)}% · UACI ${uaci(a.pixels, b.pixels).toFixed(2)}%`);
+  }
 });

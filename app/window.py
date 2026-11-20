@@ -41,7 +41,7 @@ from __future__ import annotations
 import os
 from typing import List, Optional
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import QSettings, Qt, QTimer, Signal
 from PySide6.QtGui import QAction, QDragEnterEvent, QDropEvent, QKeySequence
 from PySide6.QtWidgets import (
     QApplication,
@@ -76,8 +76,9 @@ from .pages import (
     VerifyPage,
 )
 from .pages.settings_page import SettingsPanel
+from .pages.watch_page import WatchPage
 from .sftp import is_sftp_output, parse_sftp_url
-from .settings import AppSettings
+from .settings import APP, ORG, AppSettings
 from .shell import HeaderBar, Sidebar
 from .theme import (
     MIN_WINDOW_HEIGHT,
@@ -85,6 +86,7 @@ from .theme import (
     ThemeManager,
 )
 from .widgets import FileList, GhostButton, IconButton
+from .watch import FolderWatcher
 from .workers import AnalyzeWorker, JobWorker, VerifyWorker, detect_opticipher_header
 
 __all__ = [
@@ -240,10 +242,17 @@ class MainWindow(QMainWindow):
         self.theme_manager.apply()
 
         self.history = SessionHistory()
+        self.history.attach_settings(QSettings(ORG, APP))
+        self._journal_jobs = {}
+        self.watcher = FolderWatcher(self)
+        self.watcher.activity.connect(self._record_watch)
+        self.watcher.scan_started.connect(lambda mode: self._begin_history(f"watch-{mode}", f"Auto-{mode}"))
+        self.watcher.scan_finished.connect(lambda mode, summary: self._finish_history(f"watch-{mode}", summary))
 
         self._job: Optional[JobWorker] = None
         self._analyze: Optional[AnalyzeWorker] = None
         self._verify: Optional[VerifyWorker] = None
+        self._verification_results = {}
         self._last_output_path: Optional[str] = None
         # SFTP credentials for THIS RUN ONLY (never QSettings — see
         # SftpCredentialsDialog). Keyed by (host, port, user).
@@ -252,6 +261,8 @@ class MainWindow(QMainWindow):
         self._job_failures: list = []
 
         self._build_ui()
+        self.history.on_change = self._refresh_logs
+        QTimer.singleShot(0, self, self.watcher.restore)
         self._apply_theme_visuals()
         self._refresh_device_bar()
         self.navigate("overview")
@@ -268,6 +279,12 @@ class MainWindow(QMainWindow):
         the whole shell stays alive until the garbage collector gets to it,
         and every live window is re-styled whenever the theme changes.
         """
+        if self.watcher.workers or any(worker is not None and worker.isRunning()
+               for worker in (self._job, self._analyze, self._verify)):
+            self.statusBar().showMessage("Wait for the current operation to finish before closing.")
+            event.ignore()
+            return
+        self.watcher.timer.stop()
         for page in self._pages.values():
             page.window = None
         super().closeEvent(event)
@@ -284,9 +301,10 @@ class MainWindow(QMainWindow):
                 ("decrypt", "Decrypt", "unlock"),
                 ("verify", "Verify", "shield"),
                 ("analyze", "Analyze", "chart"),
+                ("watch", "Folder watch", "folder"),
             ],
         )
-        self.sidebar.add_section("Activity", [("history", "History", "clock")])
+        self.sidebar.add_section("Review", [("history", "Logs", "clock")])
         self.sidebar.add_section(
             "System",
             [("settings", "Settings", "gear"), ("about", "About", "info")],
@@ -334,6 +352,7 @@ class MainWindow(QMainWindow):
         self.decrypt_page = DecryptPage(self)
         self.verify_page = VerifyPage(self)
         self.analyze_page = AnalyzePage(self)
+        self.watch_page = WatchPage(self)
         self.history_page = HistoryPage(self)
         self.settings_page = SettingsPage(self)
         self.about_page = AboutPage(self)
@@ -345,6 +364,7 @@ class MainWindow(QMainWindow):
                 self.decrypt_page,
                 self.verify_page,
                 self.analyze_page,
+                self.watch_page,
                 self.history_page,
                 self.settings_page,
                 self.about_page,
@@ -359,6 +379,7 @@ class MainWindow(QMainWindow):
             "history",
             "settings",
             "about",
+            "watch",
         ]
 
         self.stack = QStackedWidget()
@@ -369,6 +390,7 @@ class MainWindow(QMainWindow):
         self.encrypt_page.files.selection_changed.connect(self._on_source_selected)
         self.decrypt_page.files.selection_changed.connect(self._on_source_selected)
         self.verify_page.files.selection_changed.connect(self._on_source_selected)
+        self.verify_page.files.selection_changed.connect(self._show_verification)
         self.analyze_page.files.selection_changed.connect(self._on_source_selected)
 
         # Click-to-enlarge: the preview panels ask the window to open the
@@ -695,7 +717,6 @@ class MainWindow(QMainWindow):
         else:
             iterations = self.settings.iterations  # unused for decrypt
         out_dir = page.out_edit.text().strip()
-        self.settings.output_dir = out_dir
 
         # sftp:// destinations: validate the URL before anything starts, then
         # collect credentials once per (host, port, user) for this session.
@@ -709,6 +730,7 @@ class MainWindow(QMainWindow):
             sftp_cfg = self._sftp_credentials(target)
             if sftp_cfg is None:
                 return  # login cancelled — start no job
+        self.settings.output_dir = out_dir
 
         page.reset_steps()
         page.set_running(True)
@@ -730,6 +752,7 @@ class MainWindow(QMainWindow):
         )
         self._job.file_done.connect(self._on_file_done)
         self._job.all_done.connect(lambda ok, bad, m=mode: self._on_all_done(m, ok, bad))
+        self._begin_history(mode, mode.capitalize(), len(files))
         self._job.start()
 
         self.statusBar().showMessage(f"{mode.capitalize()}ing…")
@@ -740,6 +763,7 @@ class MainWindow(QMainWindow):
             page = self._pages[mode]
             page.set_status("Cancelling after the current file…")
             self.statusBar().showMessage("Cancelling after the current file…", 5000)
+            self.history.record(mode, "", "info", "Stop requested after current file")
 
     def _on_progress(self, mode: str, pct: int, message: str) -> None:
         page = self._pages.get(mode)
@@ -774,7 +798,7 @@ class MainWindow(QMainWindow):
             # use the LOCAL file (it always exists; mirror upload never
             # deletes it).
             payload = status[4:]
-            out_path = payload.split(" → ")[0]
+            out_path = payload.rsplit(" → uploaded sftp://", 1)[0]
             self._last_output_path = out_path
             self._set_preview("after", out_path)
             self.statusBar().showMessage(f"Saved {payload}", 8000)
@@ -798,6 +822,7 @@ class MainWindow(QMainWindow):
             "ok" if ok else "error",
             detail,
             output,
+            job_id=self._journal_jobs.get(mode),
         )
         page = self._pages.get(mode)
         if page is None or not hasattr(page, "steps"):
@@ -832,7 +857,24 @@ class MainWindow(QMainWindow):
             else:
                 page.set_step("Remote copy", "not used", "neutral")
 
+    def _record_watch(self, mode, name, status, detail, output) -> None:
+        self.history.record(f"Auto-{mode}", name, status, detail, output or None,
+                            job_id=self._journal_jobs.get(f"watch-{mode}"))
+        self.statusBar().showMessage(f"Auto-{mode} · {name} · {detail}", 8000)
+
+    def _refresh_logs(self) -> None:
+        if self._current_key() == "history":
+            self.history_page.refresh()
+
+    def _begin_history(self, key: str, name: str, file_count=None) -> None:
+        detail = "Started" if file_count is None else f"Started · {file_count} file(s)"
+        self._journal_jobs[key] = self.history.begin_job(name, detail)
+
+    def _finish_history(self, key: str, summary: str) -> None:
+        self.history.finish_job(self._journal_jobs.pop(key, None), summary)
+
     def _on_all_done(self, mode: str, ok: int, bad: int) -> None:
+        self._finish_history(mode, f"{ok} succeeded · {bad} failed or stopped")
         page = self._pages.get(mode)
         if page is not None:
             page.set_running(False)
@@ -863,28 +905,31 @@ class MainWindow(QMainWindow):
     def _start_verify(self) -> None:
         if self._verify is not None and self._verify.isRunning():
             return
-        path = self.verify_page.files.current_path()
-        if not path:
+        paths = self.verify_page.files.paths()
+        if not paths:
             QMessageBox.information(
                 self, "OptiCipher", "Choose a file to verify first."
             )
             return
-        passphrase = self.verify_page.pass_field.text().strip() or None
+        passphrase = self.verify_page.pass_field.text() or None
+        self._verification_results.clear()
         self.verify_page.reset()
         self.verify_page.progress.setVisible(True)
         self.verify_page.verify_btn.setEnabled(False)
         self.verify_page.set_status("Checking…")
         self.statusBar().showMessage("Verifying…")
 
-        self._verify = VerifyWorker(path, passphrase)
+        self._verify = VerifyWorker(paths, passphrase)
         self._verify.result.connect(self._on_verify_result)
-        self._verify.failed.connect(self._on_verify_failed)
+        self._verify.finished.connect(self._on_verify_done)
+        self._begin_history("verify", "Verify", len(paths))
         self._verify.start()
 
     def _on_verify_result(self, payload: dict) -> None:
-        self.verify_page.progress.setVisible(False)
-        self.verify_page.verify_btn.setEnabled(True)
-        self.verify_page.show_result(payload)
+        path = payload["path"]
+        self._verification_results[path] = payload
+        if path == self.verify_page.files.current_path():
+            self._show_verification(path)
         ok = bool(payload.get("ok"))
         name = os.path.basename(payload.get("path", ""))
         self.verify_page.set_status(payload.get("message", ""))
@@ -892,15 +937,27 @@ class MainWindow(QMainWindow):
         self.history.record(
             "verify",
             name,
-            "ok" if ok else "error",
+            "ok" if ok else "skip" if payload.get("status") == "unauthenticated" else "error",
             payload.get("message", ""),
+            job_id=self._journal_jobs.get("verify"),
         )
 
-    def _on_verify_failed(self, message: str) -> None:
+    def _show_verification(self, path: str) -> None:
+        payload = self._verification_results.get(path)
+        if payload is None:
+            self.verify_page.reset()
+        else:
+            self.verify_page.show_result(payload)
+
+    def _on_verify_done(self) -> None:
         self.verify_page.progress.setVisible(False)
         self.verify_page.verify_btn.setEnabled(True)
-        self.verify_page.set_status("The file could not be read.")
-        QMessageBox.warning(self, "Verification error", message)
+        checked = len(self._verification_results)
+        verified = sum(payload.get("authenticated", False) for payload in self._verification_results.values())
+        summary = f"{checked} checked · {verified} authenticated"
+        self.verify_page.set_status(summary)
+        self._finish_history("verify", summary)
+        self.statusBar().showMessage(self.verify_page.status_label.text(), 8000)
 
     # -- analyze ------------------------------------------------------------
     def _start_analyze(self) -> None:
@@ -914,17 +971,30 @@ class MainWindow(QMainWindow):
         self.analyze_page.set_status("Analyzing…")
         self._analyze = AnalyzeWorker(files)
         self._analyze.result.connect(self._on_analyze_result)
-        self._analyze.failed.connect(
-            lambda msg: QMessageBox.warning(self, "Analyze error", msg)
-        )
+        self._analyze.failed.connect(self._on_analyze_failed)
+        self._begin_history("analyze", "Analyze", len(files[:2]))
         self._analyze.start()
 
     def _on_analyze_result(self, data: dict) -> None:
         self.analyze_page.show_result(data)
+        for path in data.get("files", [])[:2]:
+            self.history.record("Analyze", os.path.basename(path), "ok",
+                                f"Analyzed on {data['backend']}", job_id=self._journal_jobs.get("analyze"))
+        summary = f"Mean entropy {data['entropy']['mean']:.4f} bits/byte"
+        if data["npcr"] is not None:
+            summary += f" · NPCR {data['npcr']:.2f}% · UACI {data['uaci']:.2f}%"
+        self._finish_history("analyze", summary)
         self.analyze_page.set_status(f"Analysis complete on backend: {data['backend']}")
         self.statusBar().showMessage(
             f"Analysis complete on backend: {data['backend']}", 8000
         )
+
+    def _on_analyze_failed(self, message: str) -> None:
+        self.history.record("Analyze", "", "error", message, job_id=self._journal_jobs.get("analyze"))
+        self._finish_history("analyze", "Analysis failed")
+        self.analyze_page.set_status("Analysis failed.")
+        self.statusBar().showMessage("Analysis failed.", 8000)
+        QMessageBox.warning(self, "Analyze error", message)
 
     # -- about --------------------------------------------------------------
     def _about(self) -> None:

@@ -41,7 +41,7 @@ hiddenimports = (
 # ship working sftp:// outputs. Absent in a bare dev install: skip quietly.
 import importlib.util as _ilu  # noqa: E402
 
-for _pkg in ("paramiko", "bcrypt", "nacl"):
+for _pkg in ("paramiko", "bcrypt", "nacl", "keyring"):
     if _ilu.find_spec(_pkg) is not None:
         hiddenimports += collect_submodules(_pkg)
 datas = collect_data_files("wgpu")

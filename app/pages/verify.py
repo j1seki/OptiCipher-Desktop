@@ -53,6 +53,7 @@ PASSPHRASE_TIP = (
 
 #: Backend status -> (label, badge variant, hint)
 _STATES = {
+    "read_error": ("Unreadable", "error", ""),
     "verified": ("Verified", "success", "The authentication tag matches."),
     "failed": ("Verification failed", "error", "The tag did not match."),
     "malformed": ("Corrupted or malformed", "error", "Not a usable ciphertext."),
@@ -91,7 +92,7 @@ class VerifyPage(BasePage):
         left_layout.setContentsMargins(0, 0, 0, 0)
         left_layout.setSpacing(GAP_MD)
 
-        file_card = Card("File", "Pick the encrypted file to check.")
+        file_card = Card("Files", "Add encrypted PNGs. Select a file to see its result.")
         self.files = FileList()
         file_card.body.addWidget(self.files)
         left_layout.addWidget(file_card)
@@ -180,7 +181,7 @@ class VerifyPage(BasePage):
         self.verify_btn = PrimaryButton("Verify")
         self.verify_btn.setObjectName("verify_run")
         self.verify_btn.setToolTip(
-            "Check the selected file's format and, with a passphrase, its "
+            "Check every queued file's format and, with a passphrase, its "
             "authentication tag"
         )
         bar_layout.addWidget(self.verify_btn)

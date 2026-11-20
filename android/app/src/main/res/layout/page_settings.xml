@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:padding="16dp">
+
+    <TextView
+        style="@style/Widget.OptiCipher.SettingsHeading"
+        android:text="@string/settings_appearance" />
+
+    <com.google.android.material.card.MaterialCardView style="@style/Widget.OptiCipher.SettingsCard">
+        <include android:id="@+id/settingTheme" layout="@layout/settings_row" />
+    </com.google.android.material.card.MaterialCardView>
+
+    <TextView
+        style="@style/Widget.OptiCipher.SettingsHeading"
+        android:text="@string/settings_access" />
+
+    <com.google.android.material.card.MaterialCardView style="@style/Widget.OptiCipher.SettingsCard">
+        <include android:id="@+id/permissionsBtn" layout="@layout/settings_row" />
+    </com.google.android.material.card.MaterialCardView>
+
+    <TextView
+        style="@style/Widget.OptiCipher.SettingsHeading"
+        android:text="@string/settings_app" />
+
+    <com.google.android.material.card.MaterialCardView style="@style/Widget.OptiCipher.SettingsCard">
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical">
+
+            <include android:id="@+id/updateBtn" layout="@layout/settings_row" />
+
+            <com.google.android.material.divider.MaterialDivider style="@style/Widget.OptiCipher.SettingsDivider" />
+
+            <include android:id="@+id/settingAbout" layout="@layout/settings_row" />
+
+            <com.google.android.material.divider.MaterialDivider style="@style/Widget.OptiCipher.SettingsDivider" />
+
+            <include android:id="@+id/settingSource" layout="@layout/settings_row" />
+        </LinearLayout>
+    </com.google.android.material.card.MaterialCardView>
+</LinearLayout>

@@ -23,13 +23,15 @@ from __future__ import annotations
 import os
 from typing import Optional
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QUrl, Qt
+from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QFileDialog,
     QFrame,
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QMessageBox,
     QProgressBar,
     QPushButton,
     QScrollArea,
@@ -39,6 +41,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from ..private_storage import private_folder
 from ..theme import GAP_LG, GAP_MD, GAP_SM
 from ..widgets import (
     Card,
@@ -126,6 +129,10 @@ class CryptPage(BasePage):
             secret_card.body.addWidget(self.confirm_field)
             self.confirm_field.setToolTip(CONFIRM_TIP)
             self.confirm_field.edit.setToolTip(CONFIRM_TIP)
+            generate = QPushButton("Generate strong passphrase")
+            generate.setToolTip("Generate a random passphrase and fill both fields")
+            generate.clicked.connect(lambda: self.pass_field.generate(self.confirm_field))
+            secret_card.body.addWidget(generate)
         left_layout.addWidget(secret_card)
 
         if self.mode == "encrypt":
@@ -168,6 +175,16 @@ class CryptPage(BasePage):
         out_row.addWidget(self.out_edit, 1)
         out_row.addWidget(browse)
         dest_card.body.addLayout(out_row)
+        private_row = QHBoxLayout()
+        use_private = QPushButton("Use private folder")
+        use_private.setToolTip("Save this batch under your user application data")
+        use_private.clicked.connect(lambda: self._use_private())
+        open_private = QPushButton("Open private folder")
+        open_private.setToolTip("Open your private results in the system file manager")
+        open_private.clicked.connect(lambda: self._use_private(open_folder=True))
+        private_row.addWidget(use_private)
+        private_row.addWidget(open_private)
+        dest_card.body.addLayout(private_row)
         self.browse_btn = browse
         left_layout.addWidget(dest_card)
         left_layout.addStretch(1)
@@ -268,6 +285,17 @@ class CryptPage(BasePage):
         if directory:
             self.out_edit.setText(directory)
             settings.output_dir = directory
+
+    def _use_private(self, open_folder=False) -> None:
+        try:
+            folder = private_folder()
+            if open_folder:
+                if not QDesktopServices.openUrl(QUrl.fromLocalFile(str(folder))):
+                    raise OSError("Could not open the private folder.")
+            else:
+                self.out_edit.setText(str(folder))
+        except OSError as error:
+            QMessageBox.warning(self, "Private folder", str(error))
 
     def set_status(self, text: str) -> None:
         self.status_label.setText(text)

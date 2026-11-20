@@ -1,17 +1,19 @@
-# Android TODO — v1.4.3
+# Android release verification
 
-- [ ] 1. Rename activation buttons to say what they do
-      ("Encrypt queued files", "Decrypt queued files", "Turn on auto-encrypt", …)
-- [ ] 2. Split folder watch into two independent jobs
-      - Card 2: Folder watch — **Encrypt** new files
-      - Card 3: Folder watch — **Decrypt** new files
-      - each with own folder, output, passphrase, interval, switch
-- [x] 3. Folder access permissions (not just gallery/images)
-      - use SAF per-folder grants (no all-files access), optional media/notification
-        prompts, with status dialog + settings links
-- [ ] 4. Folder watch: option to process **existing** images on start
-      (not only files that appear later)
-- [ ] 5. Conflict policy when the output file already exists:
-      ask / overwrite / skip (background jobs use skip unless overwrite is chosen)
-- [ ] 6. Build locally (unit tests + assembleDebug)
-- [ ] 7. Push built APK to 192.168.1.183:35131 (device already authorised)
+The Android workflow runs unit tests and lint and builds the APK. On an Android
+device or emulator, verify the following before publishing a release.
+
+- Queue a PNG and a corrupt image. Encrypt the batch, verify the valid output
+  with the correct and wrong passphrases, and decrypt it back to the original
+  pixels. Rotate the device during a batch and check that progress and result
+  links are still available.
+- Save to the private folder and find the output under **OptiCipher private** in
+  the system picker. Open and share the result through a read grant.
+- Enable independent encrypt and decrypt watches with separate test inboxes.
+  Check **Run now**, **Include existing**, **Skip** and **Overwrite**. Include a
+  bad ciphertext before a valid one and confirm the valid file still processes.
+- Set a weekly schedule near the current local time and verify that it fires
+  once, including with the activity closed. Change the device time zone and
+  verify that the next check follows the local schedule.
+- Install a release-signed build over the previous release. Confirm existing
+  folder grants, remembered watch settings and private files are accessible.

@@ -64,7 +64,8 @@ object ImageInput {
 
         val bitmap = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
             try {
-                ImageDecoder.decodeBitmap(ImageDecoder.createSource(ByteBuffer.wrap(bytes))) { decoder, _, _ ->
+                ImageDecoder.decodeBitmap(ImageDecoder.createSource(ByteBuffer.wrap(bytes))) { decoder, info, _ ->
+                    requireProcessableImage(info.size.width, info.size.height)
                     decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
                     decoder.isMutableRequired = false
                 }
@@ -75,6 +76,9 @@ object ImageInput {
                 )
             }
         } else {
+            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+            requireProcessableImage(bounds.outWidth, bounds.outHeight)
             BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
                 ?: error("unsupported image format on this Android version")
         }

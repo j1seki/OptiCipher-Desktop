@@ -4,8 +4,7 @@
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
     android:orientation="vertical"
-    android:padding="16dp"
-    android:paddingBottom="72dp">
+    android:padding="16dp">
 
     <com.google.android.material.card.MaterialCardView
         android:layout_width="match_parent"
@@ -60,8 +59,7 @@
                     android:checkable="true"
                     android:checked="true"
                     android:text="Encrypt"
-                    app:checkedIconVisible="false"
-                    app:chipIcon="@drawable/ic_lock" />
+                    app:checkedIconVisible="false" />
 
                 <com.google.android.material.chip.Chip
                     android:id="@+id/modeDecrypt"
@@ -69,8 +67,7 @@
                     android:layout_height="wrap_content"
                     android:checkable="true"
                     android:text="Decrypt"
-                    app:checkedIconVisible="false"
-                    app:chipIcon="@drawable/ic_lock_open" />
+                    app:checkedIconVisible="false" />
 
                 <com.google.android.material.chip.Chip
                     android:id="@+id/modeVerify"
@@ -78,59 +75,16 @@
                     android:layout_height="wrap_content"
                     android:checkable="true"
                     android:text="Verify"
-                    app:checkedIconVisible="false"
-                    app:chipIcon="@drawable/ic_verified" />
+                    app:checkedIconVisible="false" />
+
+                <com.google.android.material.chip.Chip
+                    android:id="@+id/modeAnalyze"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:checkable="true"
+                    android:text="Analyze"
+                    app:checkedIconVisible="false" />
             </com.google.android.material.chip.ChipGroup>
-        </LinearLayout>
-    </com.google.android.material.card.MaterialCardView>
-
-    <TextView
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginBottom="12dp"
-        android:text="Your image workspace"
-        android:textAppearance="?attr/textAppearanceHeadlineSmall"
-        android:textColor="@color/brand_on_surface" />
-
-    <com.google.android.material.card.MaterialCardView
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginBottom="16dp"
-        app:cardBackgroundColor="@color/brand_surface"
-        app:cardCornerRadius="24dp"
-        app:cardElevation="0dp"
-        app:strokeColor="@color/brand_outline"
-        app:strokeWidth="1dp">
-
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="vertical"
-            android:padding="16dp">
-
-            <TextView
-                android:id="@+id/batchStatus"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="Ready"
-                android:textAppearance="?attr/textAppearanceTitleSmall" />
-
-            <com.google.android.material.progressindicator.LinearProgressIndicator
-                android:id="@+id/batchProgress"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="8dp"
-                app:indicatorColor="@color/brand_accent"
-                app:trackColor="@color/brand_outline"
-                app:trackThickness="6dp" />
-
-            <TextView
-                android:id="@+id/batchDetail"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="4dp"
-                android:textAppearance="?attr/textAppearanceBodySmall"
-                android:textColor="?attr/colorOnSurfaceVariant" />
         </LinearLayout>
     </com.google.android.material.card.MaterialCardView>
 
@@ -221,10 +175,81 @@
                     app:icon="@drawable/ic_folder"
                     app:iconGravity="textStart" />
             </LinearLayout>
+
+            <FrameLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp">
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/startBtn"
+                    style="?attr/materialButtonStyle"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_gravity="end"
+                    android:enabled="false"
+                    android:insetTop="6dp"
+                    android:insetBottom="6dp"
+                    android:minWidth="0dp"
+                    android:minHeight="48dp"
+                    android:paddingStart="14dp"
+                    android:paddingEnd="14dp"
+                    android:text="@string/batch_encrypt"
+                    app:icon="@drawable/ic_play"
+                    app:iconGravity="textStart"
+                    app:iconPadding="6dp"
+                    app:iconSize="16dp" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/batchCancel"
+                    style="?attr/materialButtonOutlinedStyle"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_gravity="end"
+                    android:insetTop="6dp"
+                    android:insetBottom="6dp"
+                    android:minHeight="48dp"
+                    android:text="@string/batch_stop_after_file"
+                    android:visibility="gone" />
+            </FrameLayout>
+
+            <LinearLayout
+                android:id="@+id/batchFeedback"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:orientation="vertical"
+                android:visibility="gone">
+
+                <TextView
+                    android:id="@+id/batchStatus"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:accessibilityLiveRegion="polite"
+                    android:textAppearance="?attr/textAppearanceTitleSmall" />
+
+                <TextView
+                    android:id="@+id/batchDetail"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="2dp"
+                    android:textAppearance="?attr/textAppearanceBodySmall"
+                    android:textColor="?attr/colorOnSurfaceVariant" />
+
+                <com.google.android.material.progressindicator.LinearProgressIndicator
+                    android:id="@+id/batchProgress"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    app:indicatorColor="@color/brand_accent"
+                    app:trackColor="@color/brand_outline"
+                    app:trackThickness="4dp" />
+            </LinearLayout>
         </LinearLayout>
     </com.google.android.material.card.MaterialCardView>
 
     <com.google.android.material.card.MaterialCardView
+        android:id="@+id/batchSecretCard"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_marginBottom="12dp"
@@ -263,6 +288,7 @@
             </LinearLayout>
 
             <com.google.android.material.textfield.TextInputLayout
+                android:id="@+id/batchPassLayout"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="12dp"
@@ -274,7 +300,24 @@
                     android:id="@+id/pass"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
+                    android:saveEnabled="false"
                     android:inputType="textPassword" />
+            </com.google.android.material.textfield.TextInputLayout>
+
+            <com.google.android.material.textfield.TextInputLayout
+                android:id="@+id/batchConfirmLayout"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:hint="Repeat passphrase"
+                app:endIconMode="password_toggle">
+
+                <com.google.android.material.textfield.TextInputEditText
+                    android:id="@+id/batchConfirm"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:inputType="textPassword"
+                    android:saveEnabled="false" />
             </com.google.android.material.textfield.TextInputLayout>
 
             <com.google.android.material.button.MaterialButton
@@ -285,6 +328,7 @@
                 android:text="Generate strong passphrase" />
 
             <LinearLayout
+                android:id="@+id/batchKdfLabelRow"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="12dp"
@@ -319,6 +363,7 @@
     </com.google.android.material.card.MaterialCardView>
 
     <com.google.android.material.card.MaterialCardView
+        android:id="@+id/batchDestinationCard"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_marginBottom="12dp"
@@ -372,6 +417,13 @@
         </LinearLayout>
     </com.google.android.material.card.MaterialCardView>
 
+    <com.google.android.material.button.MaterialButton
+        android:id="@+id/batchSftp"
+        style="@style/Widget.Material3.Button.OutlinedButton"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Configure SFTP copy" />
+
     <com.google.android.material.materialswitch.MaterialSwitch
         android:id="@+id/privateOutput"
         android:layout_width="match_parent"
@@ -380,6 +432,7 @@
         android:contentDescription="Save batch outputs in app-private storage" />
 
     <TextView
+        android:id="@+id/privateOutputHint"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:text="Other apps cannot directly read this folder. Files are removed on uninstall; export anything you want to keep."
@@ -418,6 +471,13 @@
         android:adjustViewBounds="true"
         android:contentDescription="@null"
         android:scaleType="centerInside"
+        android:visibility="gone" />
+
+    <LinearLayout
+        android:id="@+id/batchAnalysis"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
         android:visibility="gone" />
 
     <LinearLayout

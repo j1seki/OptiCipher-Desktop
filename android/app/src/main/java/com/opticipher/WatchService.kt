@@ -11,7 +11,7 @@ import android.os.Build
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
-import android.os.PowerManager
+import android.os.SystemClock
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
@@ -19,18 +19,19 @@ import androidx.core.content.ContextCompat
 class WatchService : Service() {
     private val handler = Handler(Looper.getMainLooper())
     private val lastRun = mutableMapOf<String, Long>()
-    private var wakeLock: PowerManager.WakeLock? = null
     private val poll = object : Runnable {
         override fun run() {
-            val now = System.currentTimeMillis()
+            val now = SystemClock.elapsedRealtime()
             var active = false
-            for (mode in listOf(FolderWatcher.ENCRYPT, FolderWatcher.DECRYPT)) {
-                if (!FolderWatcher.isWatching(this@WatchService, mode)) continue
+            for (mode in FolderWatcher.MODES) {
+                if (!runsInService(this@WatchService, mode)) {
+                    lastRun.remove(mode)
+                    continue
+                }
                 active = true
-                if (FolderWatcher.isWeekly(this@WatchService, mode)) continue
                 val intervalMinutes = FolderWatcher.getIntervalMinutes(this@WatchService, mode)
                 val intervalMs = intervalMinutes * 60_000L
-                val last = lastRun[mode] ?: 0L
+                val last = lastRun.getOrPut(mode) { now }
                 if (now - last >= intervalMs) {
                     lastRun[mode] = now
                     FolderWatcher.enqueue(this@WatchService, mode)
@@ -53,9 +54,7 @@ class WatchService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        val encrypt = FolderWatcher.isWatching(this, FolderWatcher.ENCRYPT)
-        val decrypt = FolderWatcher.isWatching(this, FolderWatcher.DECRYPT)
-        if (!encrypt && !decrypt) {
+        if (FolderWatcher.MODES.none { runsInService(this, it) }) {
             stopSelf()
             return START_NOT_STICKY
         }
@@ -74,11 +73,6 @@ class WatchService : Service() {
             .build()
         val type = if (Build.VERSION.SDK_INT >= 34) ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE else 0
         ServiceCompat.startForeground(this, NOTIFICATION_ID, notification, type)
-        if (wakeLock == null) {
-            wakeLock = getSystemService(PowerManager::class.java)
-                ?.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "OptiCipher:FolderWatch")
-                ?.apply { setReferenceCounted(false); acquire() }
-        }
         handler.removeCallbacks(poll)
         handler.post(poll)
         return START_STICKY
@@ -86,8 +80,6 @@ class WatchService : Service() {
 
     override fun onDestroy() {
         handler.removeCallbacks(poll)
-        try { wakeLock?.takeIf { it.isHeld }?.release() } catch (_: Exception) { }
-        wakeLock = null
         super.onDestroy()
     }
 
@@ -96,7 +88,14 @@ class WatchService : Service() {
     companion object {
         private const val NOTIFICATION_ID = 42
 
-        fun start(context: Context) {
+        private fun runsInService(context: Context, mode: String) =
+            FolderWatcher.isWatching(context, mode) && !FolderWatcher.isWeekly(context, mode)
+
+        fun update(context: Context) {
+            if (FolderWatcher.MODES.none { runsInService(context, it) }) {
+                context.stopService(Intent(context, WatchService::class.java))
+                return
+            }
             try {
                 ContextCompat.startForegroundService(context, Intent(context, WatchService::class.java))
             } catch (_: Exception) {
@@ -104,12 +103,5 @@ class WatchService : Service() {
             }
         }
 
-        fun stopIfIdle(context: Context) {
-            if (!FolderWatcher.isWatching(context, FolderWatcher.ENCRYPT) &&
-                !FolderWatcher.isWatching(context, FolderWatcher.DECRYPT)
-            ) {
-                context.stopService(Intent(context, WatchService::class.java))
-            }
-        }
     }
 }

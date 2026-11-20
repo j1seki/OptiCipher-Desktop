@@ -36,3 +36,7 @@ test('PNG codec is pixel-exact (incl. RGBA)', () => {
   assert.deepEqual([...back.pixels], [...px]);
   assert.equal(back.channels, 4);
 });
+
+test('encrypt rejects a KDF cost that readers cannot open', async () => {
+  await assert.rejects(() => encryptImage(new Uint8Array(3), 1, 1, 3, 'test', 10_000_001), /iterations must be/);
+});

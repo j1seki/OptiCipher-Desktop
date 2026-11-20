@@ -96,7 +96,7 @@ class OverviewPage(BasePage):
             env.body.addWidget(row)
         columns.addWidget(env, 1)
 
-        activity = Card("Session activity", "What happened since the app started.")
+        activity = Card("Recent activity", "Results from batch operations and watches.")
         self.stats = {
             "total": StatTile("Operations"),
             "ok": StatTile("Succeeded"),
@@ -111,8 +111,7 @@ class OverviewPage(BasePage):
         self.activity_empty = EmptyState(
             "clock",
             "No operations yet",
-            "This build keeps no permanent history: everything you do is "
-            "logged in memory for this session only, and never written to disk.",
+            "Run a batch or folder watch to see the results here.",
         )
         activity.body.addWidget(self.activity_empty)
 
@@ -167,7 +166,7 @@ class OverviewPage(BasePage):
         self.stats["ok"].set_value(str(counts["ok"]))
         self.stats["failed"].set_value(str(counts["failed"]))
 
-        entries = history.recent(6)
+        entries = history.recent(6, include_events=False)
         # Rebuild the small activity list (a handful of rows — cheap).
         while self.activity_layout.count():
             item = self.activity_layout.takeAt(0)
